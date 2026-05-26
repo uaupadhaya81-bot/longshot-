@@ -368,7 +368,7 @@ class ScreenCaptureService : Service() {
             } finally {
                 onDone()
             }
-        }, 280)
+        }, 500)
     }
 
     private fun readScreenBitmap(): Bitmap? {
