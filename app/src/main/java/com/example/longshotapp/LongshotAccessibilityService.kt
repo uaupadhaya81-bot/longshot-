@@ -3,9 +3,11 @@ package com.example.longshotapp
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 
 class LongshotAccessibilityService : AccessibilityService() {
 
@@ -29,6 +31,28 @@ class LongshotAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         instance = null
+    }
+
+    fun getScrollableBoundsOnScreen(): Rect? {
+        val root = rootInActiveWindow ?: return null
+        return findScrollableNodeBounds(root)
+    }
+
+    private fun findScrollableNodeBounds(node: AccessibilityNodeInfo?): Rect? {
+        if (node == null) return null
+
+        val rect = Rect()
+
+        if (node.isVisibleToUser && node.isScrollable) {
+            node.getBoundsInScreen(rect)
+            if (!rect.isEmpty) return rect
+        }
+
+        for (i in 0 until node.childCount) {
+            findScrollableNodeBounds(node.getChild(i))?.let { return it }
+        }
+
+        return null
     }
 
     fun autoScrollDown(callback: () -> Unit) {
