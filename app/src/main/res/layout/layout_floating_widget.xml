@@ -1,25 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/root_container"
-    android:layout_width="wrap_content"
-    android:layout_height="wrap_content"
+    android:layout_width="72dp"
+    android:layout_height="72dp"
     android:background="@android:color/transparent">
+
     <LinearLayout
-        android:id="@+id/floating_button_click"
-        android:layout_width="65dp"
-        android:layout_height="65dp"
-        android:layout_margin="8dp"
-        android:background="@android:color/holo_blue_dark"
+        android:layout_width="72dp"
+        android:layout_height="72dp"
         android:gravity="center"
         android:orientation="vertical"
-        android:elevation="8dp">
+        android:background="@drawable/floating_widget_bg">
+
         <TextView
             android:id="@+id/button_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="REC"
-            android:textColor="@android:color/white"
+            android:text="START"
             android:textStyle="bold"
-            android:textSize="14sp" />
+            android:textSize="14sp"
+            android:textColor="@android:color/white" />
+
     </LinearLayout>
+
 </FrameLayout>
