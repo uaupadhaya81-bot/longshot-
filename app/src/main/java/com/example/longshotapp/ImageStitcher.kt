@@ -32,19 +32,17 @@ object ImageStitcher {
 
     private fun findBestOverlap(bitmapA: Bitmap, bitmapB: Bitmap): Int {
         val width = min(bitmapA.width, bitmapB.width)
-        val heightA = bitmapA.height
-        val heightB = bitmapB.height
-        val maxPossible = min(heightA, heightB) - 1
-
+        val maxPossible = min(bitmapA.height, bitmapB.height) - 1
         if (maxPossible < 20) return 0
 
-        val expected = (min(heightA, heightB) * 0.28f).toInt().coerceAtLeast(60)
+        val expected = (min(bitmapA.height, bitmapB.height) * 0.28f).toInt().coerceAtLeast(60)
         val searchMin = max(20, (expected * 0.60f).toInt())
         val searchMax = min(maxPossible, (expected * 1.45f).toInt())
 
         if (searchMin > searchMax) return 0
 
         val sampleXs = buildSampleXs(width)
+
         var bestOverlap = 0
         var bestScore = Double.MAX_VALUE
 
@@ -56,7 +54,7 @@ object ImageStitcher {
             }
         }
 
-        return if (bestScore <= 30.0) bestOverlap else 0
+        return if (bestScore <= 24.0) bestOverlap else 0
     }
 
     private fun overlapScore(
@@ -84,7 +82,7 @@ object ImageStitcher {
                 count += 3
             }
 
-            rowOffset += 3
+            rowOffset += 4
         }
 
         return if (count == 0L) Double.MAX_VALUE else total.toDouble() / count.toDouble()
@@ -92,11 +90,13 @@ object ImageStitcher {
 
     private fun buildSampleXs(width: Int): IntArray {
         val xs = ArrayList<Int>()
-        val step = max(12, width / 14)
+        val left = (width * 0.25f).toInt()
+        val right = (width * 0.75f).toInt()
+        val step = max(12, (width * 0.10f).toInt())
 
-        var x = step / 2
-        while (x < width) {
-            xs.add(x)
+        var x = left
+        while (x <= right) {
+            xs.add(x.coerceIn(0, width - 1))
             x += step
         }
 
@@ -111,6 +111,7 @@ object ImageStitcher {
     ): Bitmap {
         val width = min(baseBitmap.width, nextBitmap.width)
         val newHeight = baseBitmap.height + nextBitmap.height - overlapRows
+
         val out = Bitmap.createBitmap(width, newHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
 
