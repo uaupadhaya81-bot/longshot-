@@ -10,14 +10,50 @@ import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
 
-    private val OVERLAY_PERMISSION_REQ_CODE = 1001
-    private val MEDIA_PROJECTION_REQ_CODE = 1002
-
     private lateinit var mediaProjectionManager: MediaProjectionManager
+
+    private val overlayPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (Settings.canDrawOverlays(this)) {
+                checkAndStartService()
+            } else {
+                Toast.makeText(this, "Overlay permission is required!", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+    private val screenCaptureLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK && result.data != null) {
+                val serviceIntent = Intent(this, ScreenCaptureService::class.java).apply {
+                    putExtra("RESULT_CODE", result.resultCode)
+                    putExtra("DATA_INTENT", result.data)
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+
+                moveTaskToBack(true)
+            } else {
+                Toast.makeText(this, "Screen capture permission denied!", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                checkAndStartService()
+            } else {
+                Toast.makeText(this, "Notification permission is required!", Toast.LENGTH_SHORT).show()
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,6 +68,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun checkAndStartService() {
         when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                    android.content.pm.PackageManager.PERMISSION_GRANTED -> {
+                notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+
             !isAccessibilityServiceEnabled() -> {
                 Toast.makeText(
                     this,
@@ -46,7 +88,7 @@ class MainActivity : AppCompatActivity() {
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:$packageName")
                 )
-                startActivityForResult(intent, OVERLAY_PERMISSION_REQ_CODE)
+                overlayPermissionLauncher.launch(intent)
             }
 
             else -> {
@@ -70,42 +112,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestScreenCapturePermission() {
-        startActivityForResult(
-            mediaProjectionManager.createScreenCaptureIntent(),
-            MEDIA_PROJECTION_REQ_CODE
-        )
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-
-        when (requestCode) {
-            OVERLAY_PERMISSION_REQ_CODE -> {
-                if (Settings.canDrawOverlays(this)) {
-                    checkAndStartService()
-                } else {
-                    Toast.makeText(this, "Overlay permission is required!", Toast.LENGTH_SHORT).show()
-                }
-            }
-
-            MEDIA_PROJECTION_REQ_CODE -> {
-                if (resultCode == RESULT_OK && data != null) {
-                    val serviceIntent = Intent(this, ScreenCaptureService::class.java).apply {
-                        putExtra("RESULT_CODE", resultCode)
-                        putExtra("DATA_INTENT", data)
-                    }
-
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(serviceIntent)
-                    } else {
-                        startService(serviceIntent)
-                    }
-
-                    moveTaskToBack(true)
-                } else {
-                    Toast.makeText(this, "Screen capture permission denied!", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
+        screenCaptureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
     }
 }
