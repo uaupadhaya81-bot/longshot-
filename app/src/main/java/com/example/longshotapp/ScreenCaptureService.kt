@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
@@ -52,6 +53,8 @@ class ScreenCaptureService : Service() {
     private var screenWidth = 0
     private var screenHeight = 0
     private var screenDensity = 0
+
+    private var isFinishingSession = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -141,7 +144,7 @@ class ScreenCaptureService : Service() {
 
         val notification: Notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("Longshot Manual Mode")
-            .setContentText("Tap to capture, tap again to scroll, long-press to finish")
+            .setContentText("Tap START, then SCROLL. Tap STOP to finish.")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
             .build()
@@ -175,12 +178,29 @@ class ScreenCaptureService : Service() {
         windowManager.addView(floatingView, params)
 
         val buttonText = floatingView.findViewById<TextView>(R.id.button_text)
+        val stopText = floatingView.findViewById<TextView>(R.id.stop_text)
+
         buttonText.text = "START"
+        stopText.isEnabled = true
 
         var isFirstCapture = true
 
+        fun finishSession() {
+            if (isFinishingSession) return
+            isFinishingSession = true
+            buttonText.text = "STITCHING..."
+            stopText.isEnabled = false
+            processAndStitchImages()
+        }
+
+        stopText.setOnClickListener {
+            finishSession()
+        }
+
         val gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                if (isFinishingSession) return true
+
                 if (isFirstCapture) {
                     captureSingleFrame {
                         buttonText.text = "SCROLL"
@@ -209,8 +229,7 @@ class ScreenCaptureService : Service() {
             }
 
             override fun onLongPress(e: MotionEvent) {
-                buttonText.text = "STITCHING..."
-                processAndStitchImages()
+                finishSession()
             }
         })
 
@@ -249,6 +268,11 @@ class ScreenCaptureService : Service() {
     }
 
     private fun captureSingleFrame(onCaptureComplete: () -> Unit) {
+        if (isFinishingSession) {
+            onCaptureComplete()
+            return
+        }
+
         Handler(Looper.getMainLooper()).postDelayed({
             try {
                 imageReader?.acquireLatestImage()?.use { image ->
@@ -287,7 +311,7 @@ class ScreenCaptureService : Service() {
     }
 
     private fun cropVisibleArea(bitmap: Bitmap): Bitmap {
-        val scrollBounds = LongshotAccessibilityService.instance?.getScrollableBoundsOnScreen()
+        val scrollBounds = getScrollableBoundsOnScreenSafely()
 
         if (scrollBounds != null && !scrollBounds.isEmpty) {
             val left = scrollBounds.left.coerceIn(0, bitmap.width - 1)
@@ -312,6 +336,16 @@ class ScreenCaptureService : Service() {
         if (safeHeight <= 0) return bitmap
 
         return Bitmap.createBitmap(bitmap, 0, safeTop, bitmap.width, safeHeight)
+    }
+
+    private fun getScrollableBoundsOnScreenSafely(): Rect? {
+        return try {
+            val service = LongshotAccessibilityService.instance ?: return null
+            val method = service.javaClass.getMethod("getScrollableBoundsOnScreen")
+            method.invoke(service) as? Rect
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun getStatusBarHeight(): Int {
@@ -344,9 +378,15 @@ class ScreenCaptureService : Service() {
 
         if (stitchedBitmap != null) {
             saveBitmapToStorage(stitchedBitmap)
+            stitchedBitmap.recycle()
         } else {
             Toast.makeText(this, "Stitching failed!", Toast.LENGTH_SHORT).show()
         }
+
+        capturedBitmaps.forEach { bitmap ->
+            if (!bitmap.isRecycled) bitmap.recycle()
+        }
+        capturedBitmaps.clear()
 
         stopSelf()
     }
