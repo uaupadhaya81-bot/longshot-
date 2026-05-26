@@ -2,16 +2,31 @@
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="16dp">
+    android:padding="24dp"
+    android:background="@android:color/white">
+
     <TextView
         android:id="@+id/title_text"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_centerHorizontal="true"
-        android:layout_marginTop="100dp"
+        android:layout_marginTop="80dp"
         android:text="Offline Longshot Capture"
         android:textSize="24sp"
-        android:textStyle="bold" />
+        android:textStyle="bold"
+        android:textColor="@android:color/black" />
+
+    <TextView
+        android:id="@+id/instruction_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/title_text"
+        android:layout_marginTop="20dp"
+        android:text="1. Enable Accessibility Service\n2. Allow overlay permission\n3. Tap Start to begin capture"
+        android:textSize="16sp"
+        android:lineSpacingExtra="6dp"
+        android:textColor="@android:color/darker_gray" />
+
     <Button
         android:id="@+id/btn_start"
         android:layout_width="match_parent"
@@ -20,4 +35,5 @@
         android:padding="16dp"
         android:text="Start Longshot Service"
         android:textSize="18sp" />
+
 </RelativeLayout>
