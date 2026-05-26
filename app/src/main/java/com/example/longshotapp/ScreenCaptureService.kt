@@ -14,6 +14,7 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -24,25 +25,32 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.MediaStore
 import android.util.DisplayMetrics
-import android.util.TypedValue
-import android.view.Gravity
 import android.view.GestureDetector
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 class ScreenCaptureService : Service() {
 
     private lateinit var windowManager: WindowManager
     private lateinit var floatingView: View
-    private lateinit var params: WindowManager.LayoutParams
+    private lateinit var floatingParams: WindowManager.LayoutParams
+
+    private var selectorRoot: View? = null
+    private var selectorParams: WindowManager.LayoutParams? = null
+    private var selectorView: CaptureRectSelectorView? = null
 
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
@@ -54,7 +62,11 @@ class ScreenCaptureService : Service() {
     private var screenHeight = 0
     private var screenDensity = 0
 
+    private var selectedFrame: Rect? = null
+    private var sessionStarted = false
     private var isFinishingSession = false
+
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -64,18 +76,17 @@ class ScreenCaptureService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val windowMetrics = windowManager.currentWindowMetrics
-            val bounds = windowMetrics.bounds
+            val bounds = windowManager.currentWindowMetrics.bounds
             screenWidth = bounds.width()
             screenHeight = bounds.height()
             screenDensity = resources.configuration.densityDpi
         } else {
-            val displayMetrics = DisplayMetrics()
+            val metrics = DisplayMetrics()
             @Suppress("DEPRECATION")
-            windowManager.defaultDisplay.getMetrics(displayMetrics)
-            screenWidth = displayMetrics.widthPixels
-            screenHeight = displayMetrics.heightPixels
-            screenDensity = displayMetrics.densityDpi
+            windowManager.defaultDisplay.getMetrics(metrics)
+            screenWidth = metrics.widthPixels
+            screenHeight = metrics.heightPixels
+            screenDensity = metrics.densityDpi
         }
 
         startForegroundServiceNotification()
@@ -144,7 +155,7 @@ class ScreenCaptureService : Service() {
 
         val notification: Notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("Longshot Manual Mode")
-            .setContentText("Tap START, then SCROLL. Tap STOP to finish.")
+            .setContentText("Tap the floating button to select frame, capture, scroll, and stop.")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
             .build()
@@ -163,7 +174,7 @@ class ScreenCaptureService : Service() {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
-        params = WindowManager.LayoutParams(
+        floatingParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             layoutType,
@@ -171,25 +182,24 @@ class ScreenCaptureService : Service() {
             PixelFormat.TRANSLUCENT
         )
 
-        params.gravity = Gravity.TOP or Gravity.START
-        params.x = 100
-        params.y = 100
+        floatingParams.gravity = Gravity.TOP or Gravity.START
+        floatingParams.x = 100
+        floatingParams.y = 100
 
-        windowManager.addView(floatingView, params)
+        windowManager.addView(floatingView, floatingParams)
 
         val buttonText = floatingView.findViewById<TextView>(R.id.button_text)
         val stopText = floatingView.findViewById<TextView>(R.id.stop_text)
 
-        buttonText.text = "START"
-        stopText.isEnabled = true
-
-        var isFirstCapture = true
+        updateFloatingText(buttonText)
 
         fun finishSession() {
             if (isFinishingSession) return
             isFinishingSession = true
             buttonText.text = "STITCHING..."
             stopText.isEnabled = false
+            selectorRoot?.let { safeRemoveView(it) }
+            selectorRoot = null
             processAndStitchImages()
         }
 
@@ -201,28 +211,16 @@ class ScreenCaptureService : Service() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 if (isFinishingSession) return true
 
-                if (isFirstCapture) {
-                    captureSingleFrame {
-                        buttonText.text = "SCROLL"
-                        isFirstCapture = false
-                    }
+                if (selectedFrame == null) {
+                    showFrameSelector(buttonText)
                 } else {
-                    floatingView.visibility = View.INVISIBLE
-                    val scroller = LongshotAccessibilityService.instance
-
-                    if (scroller != null) {
-                        scroller.autoScrollDown {
-                            captureSingleFrame {
-                                floatingView.visibility = View.VISIBLE
-                            }
+                    if (!sessionStarted) {
+                        captureCurrentFrame {
+                            sessionStarted = true
+                            buttonText.text = "SCROLL"
                         }
                     } else {
-                        floatingView.visibility = View.VISIBLE
-                        Toast.makeText(
-                            applicationContext,
-                            "Please enable Accessibility Permission!",
-                            Toast.LENGTH_LONG
-                        ).show()
+                        scrollThenCapture(buttonText)
                     }
                 }
                 return true
@@ -244,8 +242,8 @@ class ScreenCaptureService : Service() {
 
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
-                        initialX = params.x
-                        initialY = params.y
+                        initialX = floatingParams.x
+                        initialY = floatingParams.y
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
                         return true
@@ -255,9 +253,9 @@ class ScreenCaptureService : Service() {
                         val deltaX = (event.rawX - initialTouchX).toInt()
                         val deltaY = (event.rawY - initialTouchY).toInt()
                         if (kotlin.math.abs(deltaX) > 15 || kotlin.math.abs(deltaY) > 15) {
-                            params.x = initialX + deltaX
-                            params.y = initialY + deltaY
-                            windowManager.updateViewLayout(floatingView, params)
+                            floatingParams.x = initialX + deltaX
+                            floatingParams.y = initialY + deltaY
+                            windowManager.updateViewLayout(floatingView, floatingParams)
                         }
                         return true
                     }
@@ -267,104 +265,144 @@ class ScreenCaptureService : Service() {
         })
     }
 
-    private fun captureSingleFrame(onCaptureComplete: () -> Unit) {
-        if (isFinishingSession) {
-            onCaptureComplete()
+    private fun updateFloatingText(buttonText: TextView) {
+        buttonText.text = when {
+            selectedFrame == null -> "SELECT FRAME"
+            !sessionStarted -> "CAPTURE"
+            else -> "SCROLL"
+        }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun showFrameSelector(buttonText: TextView) {
+        if (selectorRoot != null) return
+
+        floatingView.visibility = View.INVISIBLE
+
+        val root = LayoutInflater.from(this).inflate(R.layout.layout_frame_selector, null)
+        val selector = root.findViewById<CaptureRectSelectorView>(R.id.selector_view)
+        val lockButton = root.findViewById<Button>(R.id.btn_lock_frame)
+
+        selectorView = selector
+        selectorRoot = root
+
+        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
+        selectorParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            layoutType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+        }
+
+        windowManager.addView(root, selectorParams)
+
+        lockButton.setOnClickListener {
+            val frame = selector.getFrameRect()
+            selectedFrame = frame
+            selectorRoot?.let { safeRemoveView(it) }
+            selectorRoot = null
+            selectorView = null
+            floatingView.visibility = View.VISIBLE
+            updateFloatingText(buttonText)
+            Toast.makeText(this, "Frame locked: $frame", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun scrollThenCapture(buttonText: TextView) {
+        val frame = selectedFrame ?: run {
+            updateFloatingText(buttonText)
             return
         }
 
-        Handler(Looper.getMainLooper()).postDelayed({
-            try {
-                imageReader?.acquireLatestImage()?.use { image ->
-                    val plane = image.planes[0]
-                    val buffer = plane.buffer
-                    val pixelStride = plane.pixelStride
-                    val rowStride = plane.rowStride
-                    val rowPadding = rowStride - pixelStride * screenWidth
+        val scroller = LongshotAccessibilityService.instance
+        if (scroller == null) {
+            floatingView.visibility = View.VISIBLE
+            Toast.makeText(this, "Enable Accessibility Service first.", Toast.LENGTH_LONG).show()
+            return
+        }
 
-                    val rawBitmap = Bitmap.createBitmap(
-                        screenWidth + rowPadding / pixelStride,
-                        screenHeight,
-                        Bitmap.Config.ARGB_8888
-                    )
-                    rawBitmap.copyPixelsFromBuffer(buffer)
+        floatingView.visibility = View.INVISIBLE
 
-                    val cleanBitmap = Bitmap.createBitmap(rawBitmap, 0, 0, screenWidth, screenHeight)
-                    val croppedBitmap = cropVisibleArea(cleanBitmap)
+        val overlap = (frame.height() * 0.28f).toInt().coerceAtLeast(60)
+        val scrollDistance = maxOf(180, frame.height() - overlap)
 
-                    capturedBitmaps.add(croppedBitmap)
-                    Toast.makeText(this, "Frame ${capturedBitmaps.size} captured", Toast.LENGTH_SHORT).show()
-
-                    if (croppedBitmap !== cleanBitmap) {
-                        cleanBitmap.recycle()
-                    }
-                    if (rawBitmap !== cleanBitmap) {
-                        rawBitmap.recycle()
-                    }
-                }
-            } catch (e: Exception) {
-                Toast.makeText(this, "Capture missed, try again!", Toast.LENGTH_SHORT).show()
-            } finally {
-                onCaptureComplete()
+        scroller.scrollWithinRect(frame, scrollDistance) {
+            captureCurrentFrame {
+                floatingView.visibility = View.VISIBLE
             }
-        }, 180)
-    }
-
-    private fun cropVisibleArea(bitmap: Bitmap): Bitmap {
-        val scrollBounds = getScrollableBoundsOnScreenSafely()
-
-        if (scrollBounds != null && !scrollBounds.isEmpty) {
-            val left = scrollBounds.left.coerceIn(0, bitmap.width - 1)
-            val top = scrollBounds.top.coerceIn(0, bitmap.height - 1)
-            val right = scrollBounds.right.coerceIn(left + 1, bitmap.width)
-            val bottom = scrollBounds.bottom.coerceIn(top + 1, bitmap.height)
-
-            return Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
-        }
-
-        val statusBar = getStatusBarHeight()
-        val navBar = getNavigationBarHeight()
-        val actionBar = getActionBarHeight()
-
-        val topCrop = maxOf(statusBar, actionBar)
-        val bottomCrop = navBar
-
-        val safeTop = topCrop.coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
-        val safeBottom = bottomCrop.coerceAtLeast(0).coerceAtMost(bitmap.height - safeTop - 1)
-        val safeHeight = bitmap.height - safeTop - safeBottom
-
-        if (safeHeight <= 0) return bitmap
-
-        return Bitmap.createBitmap(bitmap, 0, safeTop, bitmap.width, safeHeight)
-    }
-
-    private fun getScrollableBoundsOnScreenSafely(): Rect? {
-        return try {
-            val service = LongshotAccessibilityService.instance ?: return null
-            val method = service.javaClass.getMethod("getScrollableBoundsOnScreen")
-            method.invoke(service) as? Rect
-        } catch (_: Exception) {
-            null
         }
     }
 
-    private fun getStatusBarHeight(): Int {
-        val resId = resources.getIdentifier("status_bar_height", "dimen", "android")
-        return if (resId > 0) resources.getDimensionPixelSize(resId) else 0
-    }
-
-    private fun getNavigationBarHeight(): Int {
-        val resId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
-        return if (resId > 0) resources.getDimensionPixelSize(resId) else 0
-    }
-
-    private fun getActionBarHeight(): Int {
-        val typedValue = TypedValue()
-        return if (theme.resolveAttribute(android.R.attr.actionBarSize, typedValue, true)) {
-            TypedValue.complexToDimensionPixelSize(typedValue.data, resources.displayMetrics)
-        } else {
-            0
+    private fun captureCurrentFrame(onDone: () -> Unit) {
+        if (isFinishingSession) {
+            onDone()
+            return
         }
+
+        mainHandler.postDelayed({
+            try {
+                val fullBitmap = readScreenBitmap() ?: run {
+                    onDone()
+                    return@postDelayed
+                }
+
+                val frame = selectedFrame
+                val finalBitmap = if (frame != null) cropToFrame(fullBitmap, frame) else fullBitmap
+
+                if (finalBitmap !== fullBitmap) {
+                    fullBitmap.recycle()
+                }
+
+                capturedBitmaps.add(finalBitmap)
+            } catch (e: Exception) {
+                Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                onDone()
+            }
+        }, 280)
+    }
+
+    private fun readScreenBitmap(): Bitmap? {
+        val image = imageReader?.acquireLatestImage() ?: return null
+
+        image.use { img ->
+            val plane = img.planes[0]
+            val buffer = plane.buffer
+            val pixelStride = plane.pixelStride
+            val rowStride = plane.rowStride
+            val rowPadding = rowStride - pixelStride * img.width
+
+            val bitmap = Bitmap.createBitmap(
+                img.width + rowPadding / pixelStride,
+                img.height,
+                Bitmap.Config.ARGB_8888
+            )
+            bitmap.copyPixelsFromBuffer(buffer)
+
+            val cropped = Bitmap.createBitmap(bitmap, 0, 0, img.width, img.height)
+            if (cropped != bitmap) {
+                bitmap.recycle()
+            }
+            return cropped
+        }
+    }
+
+    private fun cropToFrame(bitmap: Bitmap, frame: Rect): Bitmap {
+        val left = frame.left.coerceIn(0, bitmap.width - 1)
+        val top = frame.top.coerceIn(0, bitmap.height - 1)
+        val right = frame.right.coerceIn(left + 1, bitmap.width)
+        val bottom = frame.bottom.coerceIn(top + 1, bitmap.height)
+
+        return Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
     }
 
     private fun processAndStitchImages() {
@@ -436,13 +474,23 @@ class ScreenCaptureService : Service() {
         imageReader = null
     }
 
+    private fun safeRemoveView(view: View) {
+        try {
+            windowManager.removeView(view)
+        } catch (_: Exception) {
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         cleanUpEngine()
         mediaProjection?.stop()
 
         if (::floatingView.isInitialized) {
-            windowManager.removeView(floatingView)
+            safeRemoveView(floatingView)
         }
+
+        selectorRoot?.let { safeRemoveView(it) }
+        selectorRoot = null
     }
 }
