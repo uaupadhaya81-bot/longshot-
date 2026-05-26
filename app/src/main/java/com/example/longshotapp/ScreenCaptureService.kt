@@ -38,9 +38,8 @@ import androidx.core.app.NotificationCompat
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
+import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.roundToInt
 
 class ScreenCaptureService : Service() {
 
@@ -198,6 +197,7 @@ class ScreenCaptureService : Service() {
             isFinishingSession = true
             buttonText.text = "STITCHING..."
             stopText.isEnabled = false
+            hideOverlayChrome()
             selectorRoot?.let { safeRemoveView(it) }
             selectorRoot = null
             processAndStitchImages()
@@ -252,7 +252,7 @@ class ScreenCaptureService : Service() {
                     MotionEvent.ACTION_MOVE -> {
                         val deltaX = (event.rawX - initialTouchX).toInt()
                         val deltaY = (event.rawY - initialTouchY).toInt()
-                        if (kotlin.math.abs(deltaX) > 15 || kotlin.math.abs(deltaY) > 15) {
+                        if (abs(deltaX) > 15 || abs(deltaY) > 15) {
                             floatingParams.x = initialX + deltaX
                             floatingParams.y = initialY + deltaY
                             windowManager.updateViewLayout(floatingView, floatingParams)
@@ -277,7 +277,7 @@ class ScreenCaptureService : Service() {
     private fun showFrameSelector(buttonText: TextView) {
         if (selectorRoot != null) return
 
-        floatingView.visibility = View.INVISIBLE
+        hideOverlayChrome()
 
         val root = LayoutInflater.from(this).inflate(R.layout.layout_frame_selector, null)
         val selector = root.findViewById<CaptureRectSelectorView>(R.id.selector_view)
@@ -311,7 +311,7 @@ class ScreenCaptureService : Service() {
             selectorRoot?.let { safeRemoveView(it) }
             selectorRoot = null
             selectorView = null
-            floatingView.visibility = View.VISIBLE
+            showOverlayChrome()
             updateFloatingText(buttonText)
             Toast.makeText(this, "Frame locked: $frame", Toast.LENGTH_SHORT).show()
         }
@@ -325,20 +325,32 @@ class ScreenCaptureService : Service() {
 
         val scroller = LongshotAccessibilityService.instance
         if (scroller == null) {
-            floatingView.visibility = View.VISIBLE
+            showOverlayChrome()
             Toast.makeText(this, "Enable Accessibility Service first.", Toast.LENGTH_LONG).show()
             return
         }
 
-        floatingView.visibility = View.INVISIBLE
+        hideOverlayChrome()
 
         val overlap = (frame.height() * 0.28f).toInt().coerceAtLeast(60)
-        val scrollDistance = maxOf(180, frame.height() - overlap)
+        val scrollDistance = max(180, frame.height() - overlap)
 
         scroller.scrollWithinRect(frame, scrollDistance) {
             captureCurrentFrame {
-                floatingView.visibility = View.VISIBLE
+                showOverlayChrome()
             }
+        }
+    }
+
+    private fun hideOverlayChrome() {
+        if (::floatingView.isInitialized) {
+            floatingView.visibility = View.GONE
+        }
+    }
+
+    private fun showOverlayChrome() {
+        if (::floatingView.isInitialized && !isFinishingSession) {
+            floatingView.visibility = View.VISIBLE
         }
     }
 
@@ -347,6 +359,8 @@ class ScreenCaptureService : Service() {
             onDone()
             return
         }
+
+        hideOverlayChrome()
 
         mainHandler.postDelayed({
             try {
@@ -366,6 +380,7 @@ class ScreenCaptureService : Service() {
             } catch (e: Exception) {
                 Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
             } finally {
+                showOverlayChrome()
                 onDone()
             }
         }, 500)
