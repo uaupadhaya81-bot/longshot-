@@ -10,9 +10,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Color
 import android.graphics.PixelFormat
-import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
@@ -289,6 +287,17 @@ class ScreenCaptureService : Service() {
     }
 
     private fun cropVisibleArea(bitmap: Bitmap): Bitmap {
+        val scrollBounds = LongshotAccessibilityService.instance?.getScrollableBoundsOnScreen()
+
+        if (scrollBounds != null && !scrollBounds.isEmpty) {
+            val left = scrollBounds.left.coerceIn(0, bitmap.width - 1)
+            val top = scrollBounds.top.coerceIn(0, bitmap.height - 1)
+            val right = scrollBounds.right.coerceIn(left + 1, bitmap.width)
+            val bottom = scrollBounds.bottom.coerceIn(top + 1, bitmap.height)
+
+            return Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
+        }
+
         val statusBar = getStatusBarHeight()
         val navBar = getNavigationBarHeight()
         val actionBar = getActionBarHeight()
