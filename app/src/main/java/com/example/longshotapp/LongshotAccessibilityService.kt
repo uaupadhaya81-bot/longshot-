@@ -33,10 +33,11 @@ class LongshotAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Performs a mathematically precise scroll and returns the EXACT pixel 
-     * distance traveled so the stitcher can crop perfectly without guessing.
+     * Performs a mathematically precise scroll utilizing a dynamic speed setting,
+     * immediately followed by a secondary 50-pixel slow crawl gesture to absorb 
+     * and kill any remaining inertial kinetic flinging velocity.
      */
-    fun scrollExactDistance(scrollRect: Rect, requestedDistancePx: Int, callback: (Int) -> Unit) {
+    fun scrollExactDistance(scrollRect: Rect, requestedDistancePx: Int, speedIndex: Int, callback: (Int) -> Unit) {
         val centerX = scrollRect.centerX().toFloat()
 
         // Start near the bottom of the bounding box, leaving a 15% safe margin
@@ -48,7 +49,6 @@ class LongshotAccessibilityService : AccessibilityService() {
         
         // Ensure we don't try to scroll further than the physical screen allows
         val actualDistancePx = requestedDistancePx.toFloat().coerceAtMost(maxPossibleDistance).toInt()
-        
         val endY = startY - actualDistancePx
 
         val path = Path().apply {
@@ -56,11 +56,15 @@ class LongshotAccessibilityService : AccessibilityService() {
             lineTo(centerX, endY)
         }
 
-        // SLOW DRAG MECHANISM: 
-        // We force the swipe to take at least 2 milliseconds per pixel (minimum 800ms).
-        // This drops the release velocity to near-zero, entirely preventing the 
-        // system's automatic kinetic scroll animation.
-        val duration = (actualDistancePx * 4L).coerceAtLeast(800L)
+        // --- DYNAMIC SPEED MULTIPLIER LOGIC ---
+        // Maps the UI preferences directly to operational gesture timing profiles
+        val (multiplier, floor) = when (speedIndex) {
+            0 -> Pair(8L, 1600L)  // 0.5x Speed (Slower drag)
+            2 -> Pair(2L, 400L)   // 2x Speed (Faster drag)
+            3 -> Pair(1L, 200L)   // 4x Speed (Fastest drag)
+            else -> Pair(4L, 800L) // 1x Speed (Original baseline app default)
+        }
+        val duration = (actualDistancePx * multiplier).coerceAtLeast(floor)
 
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
@@ -68,11 +72,32 @@ class LongshotAccessibilityService : AccessibilityService() {
 
         val handler = Handler(Looper.getMainLooper())
 
+        // Dispatch the initial scrolling gesture
         dispatchGesture(gesture, object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
-                // Wait 400ms after the physical gesture ends to ensure 
-                // the screen rendering has completely settled before capturing.
-                handler.postDelayed({ callback(actualDistancePx) }, 400)
+                
+                // --- INSTANT SECONDARY BRAKING GESTURE ---
+                // The millisecond the primary gesture concludes, land a 50-pixel 
+                // slow gesture on top of the UI thread to cancel out structural flinging.
+                val brakePath = Path().apply {
+                    moveTo(centerX, endY)
+                    lineTo(centerX, (endY - 50f).coerceAtLeast(scrollRect.top.toFloat()))
+                }
+
+                val brakeGesture = GestureDescription.Builder()
+                    .addStroke(GestureDescription.StrokeDescription(brakePath, 0, 600L)) // 600ms intentional dampening
+                    .build()
+
+                dispatchGesture(brakeGesture, object : GestureResultCallback() {
+                    override fun onCompleted(stopGestureDescription: GestureDescription?) {
+                        // Allow layout buffers to settle completely before firing the snapshot engine
+                        handler.postDelayed({ callback(actualDistancePx) }, 400)
+                    }
+
+                    override fun onCancelled(stopGestureDescription: GestureDescription?) {
+                        handler.postDelayed({ callback(actualDistancePx) }, 400)
+                    }
+                }, handler)
             }
 
             override fun onCancelled(gestureDescription: GestureDescription?) {
