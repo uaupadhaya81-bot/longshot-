@@ -333,13 +333,12 @@ class ScreenCaptureService : Service() {
         // Ask to scroll 75% of the frame height
         val requestedScroll = (frame.height() * 0.75f).toInt()
 
-        // --- FULL REPAIRED LAMBDA BLOCK ---
-        // Uses explicit function parameter assignment logic to eliminate layout type matching failures
-        scroller.scrollExactDistance(frame, requestedScroll, currentSpeedIndex, fun(actualDistancePx: Int) {
+        // Forward our live speed multiplier preference index into the accessibility engine
+        scroller.scrollExactDistance(frame, requestedScroll, currentSpeedIndex) { actualDistancePx ->
             captureCurrentFrame(actualDistancePx) {
                 showOverlayChrome()
             }
-        })
+        }
     }
 
     private fun hideOverlayChrome() {
