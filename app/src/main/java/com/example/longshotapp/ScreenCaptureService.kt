@@ -213,7 +213,6 @@ class ScreenCaptureService : Service() {
 
         stopText.setOnClickListener { finishSession() }
 
-        // --- AUTOMATED LOOPING INTERFACE TOGGLE ---
         autoText.setOnClickListener {
             if (isFinishingSession || !sessionStarted) return@setOnClickListener
 
@@ -361,7 +360,6 @@ class ScreenCaptureService : Service() {
         }
     }
 
-    // --- RE-ENGINEERED PIPELINE ENABLING AN ITERATIVE ASYNC CALLBACK LOOP ---
     private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = null) {
         val frame = selectedFrame ?: run {
             updateFloatingText(buttonText)
@@ -396,7 +394,8 @@ class ScreenCaptureService : Service() {
 
         // 450ms cooldown allows ample buffer time for the target application to update views
         mainHandler.postDelayed({
-            if (!isAutoMode || isFinishingSession) return
+            // --- FIX ENFORCED HERE: Explicitly scoped exit label tag ---
+            if (!isAutoMode || isFinishingSession) return@postDelayed
 
             scrollThenCapture(buttonText) {
                 // Cascades cleanly into the subsequent iteration loop once processing cycle completely wraps up
@@ -539,7 +538,7 @@ class ScreenCaptureService : Service() {
         }
     }
 
-    private fun cleanUpEngine() {
+        private fun cleanUpEngine() {
         virtualDisplay?.release()
         virtualDisplay = null
         imageReader?.close()
@@ -565,4 +564,4 @@ class ScreenCaptureService : Service() {
         selectorRoot?.let { safeRemoveView(it) }
         selectorRoot = null
     }
-}    
+}
