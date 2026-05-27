@@ -386,7 +386,9 @@ class ScreenCaptureService : Service() {
             autoText.visibility = View.GONE
             dividerAuto.visibility = View.GONE
         }
-            private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = null) {
+    }
+
+    private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = null) {
         val frame = selectedFrame ?: run {
             updateFloatingText(buttonText)
             onComplete?.invoke()
@@ -539,7 +541,7 @@ class ScreenCaptureService : Service() {
             val cropped = Bitmap.createBitmap(bitmap, 0, 0, img.width, img.height)
             if (cropped != bitmap) {
                 bitmap.recycle()
-            }
+                   }
             return cropped
         }
     }
@@ -635,7 +637,4 @@ class ScreenCaptureService : Service() {
         selectorRoot?.let { safeRemoveView(it) }
         selectorRoot = null
     }
-    }
-    
-    }
-    
+}
