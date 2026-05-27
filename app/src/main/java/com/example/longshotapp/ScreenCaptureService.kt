@@ -14,7 +14,6 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
-import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -39,7 +38,9 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
 import kotlin.math.abs
-import kotlin.math.max
+
+// Data class to link a captured image with the exact pixel distance it shifted
+data class CaptureFrame(val bitmap: Bitmap, val scrollDistance: Int)
 
 class ScreenCaptureService : Service() {
 
@@ -55,7 +56,8 @@ class ScreenCaptureService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
 
-    private val capturedBitmaps = ArrayList<Bitmap>()
+    // Now storing our new CaptureFrame objects instead of raw Bitmaps
+    private val capturedFrames = ArrayList<CaptureFrame>()
 
     private var screenWidth = 0
     private var screenHeight = 0
@@ -93,8 +95,7 @@ class ScreenCaptureService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val resultCode = intent?.getIntExtra("RESULT_CODE", Activity.RESULT_CANCELED)
-            ?: Activity.RESULT_CANCELED
+        val resultCode = intent?.getIntExtra("RESULT_CODE", Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
         val dataIntent = intent?.getParcelableExtra<Intent>("DATA_INTENT")
 
         if (resultCode == Activity.RESULT_OK && dataIntent != null) {
@@ -111,12 +112,7 @@ class ScreenCaptureService : Service() {
 
     private fun initCaptureEngine() {
         try {
-            imageReader = ImageReader.newInstance(
-                screenWidth,
-                screenHeight,
-                PixelFormat.RGBA_8888,
-                2
-            )
+            imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2)
 
             mediaProjection?.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
@@ -143,17 +139,13 @@ class ScreenCaptureService : Service() {
         val channelId = "longshot_service_channel"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "Longshot Capture",
-                NotificationManager.IMPORTANCE_LOW
-            )
+            val channel = NotificationChannel(channelId, "Longshot Capture", NotificationManager.IMPORTANCE_LOW)
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
         }
 
         val notification: Notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Longshot Manual Mode")
+            .setContentTitle("Longshot Deterministic Mode")
             .setContentText("Tap the floating button to select frame, capture, scroll, and stop.")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
@@ -203,9 +195,7 @@ class ScreenCaptureService : Service() {
             processAndStitchImages()
         }
 
-        stopText.setOnClickListener {
-            finishSession()
-        }
+        stopText.setOnClickListener { finishSession() }
 
         val gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
@@ -215,7 +205,8 @@ class ScreenCaptureService : Service() {
                     showFrameSelector(buttonText)
                 } else {
                     if (!sessionStarted) {
-                        captureCurrentFrame {
+                        // First capture has a scroll distance of 0
+                        captureCurrentFrame(0) {
                             sessionStarted = true
                             buttonText.text = "SCROLL"
                         }
@@ -248,7 +239,6 @@ class ScreenCaptureService : Service() {
                         initialTouchY = event.rawY
                         return true
                     }
-
                     MotionEvent.ACTION_MOVE -> {
                         val deltaX = (event.rawX - initialTouchX).toInt()
                         val deltaY = (event.rawY - initialTouchY).toInt()
@@ -332,11 +322,12 @@ class ScreenCaptureService : Service() {
 
         hideOverlayChrome()
 
-        val overlap = (frame.height() * 0.28f).toInt().coerceAtLeast(60)
-        val scrollDistance = max(180, frame.height() - overlap)
+        // We ask to scroll 75% of the frame height. 
+        // The scroller will execute a slow drag and return the exact pixels moved.
+        val requestedScroll = (frame.height() * 0.75f).toInt()
 
-        scroller.scrollWithinRect(frame, scrollDistance) {
-            captureCurrentFrame {
+        scroller.scrollExactDistance(frame, requestedScroll) { actualDistancePx ->
+            captureCurrentFrame(actualDistancePx) {
                 showOverlayChrome()
             }
         }
@@ -354,7 +345,8 @@ class ScreenCaptureService : Service() {
         }
     }
 
-    private fun captureCurrentFrame(onDone: () -> Unit) {
+    // Now takes the exact distance as a parameter and stores it with the image
+    private fun captureCurrentFrame(distanceScrolled: Int, onDone: () -> Unit) {
         if (isFinishingSession) {
             onDone()
             return
@@ -376,7 +368,7 @@ class ScreenCaptureService : Service() {
                     fullBitmap.recycle()
                 }
 
-                capturedBitmaps.add(finalBitmap)
+                capturedFrames.add(CaptureFrame(finalBitmap, distanceScrolled))
             } catch (e: Exception) {
                 Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
             } finally {
@@ -421,13 +413,14 @@ class ScreenCaptureService : Service() {
     }
 
     private fun processAndStitchImages() {
-        if (capturedBitmaps.isEmpty()) {
+        if (capturedFrames.isEmpty()) {
             Toast.makeText(this, "No frames captured!", Toast.LENGTH_SHORT).show()
             stopSelf()
             return
         }
 
-        val stitchedBitmap = ImageStitcher.stitch(capturedBitmaps)
+        // Call our new deterministic stitch method
+        val stitchedBitmap = ImageStitcher.stitchExact(capturedFrames)
 
         if (stitchedBitmap != null) {
             saveBitmapToStorage(stitchedBitmap)
@@ -436,10 +429,10 @@ class ScreenCaptureService : Service() {
             Toast.makeText(this, "Stitching failed!", Toast.LENGTH_SHORT).show()
         }
 
-        capturedBitmaps.forEach { bitmap ->
-            if (!bitmap.isRecycled) bitmap.recycle()
+        capturedFrames.forEach { frame ->
+            if (!frame.bitmap.isRecycled) frame.bitmap.recycle()
         }
-        capturedBitmaps.clear()
+        capturedFrames.clear()
 
         stopSelf()
     }
@@ -453,15 +446,9 @@ class ScreenCaptureService : Service() {
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
                     put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
-                    put(
-                        MediaStore.MediaColumns.RELATIVE_PATH,
-                        Environment.DIRECTORY_PICTURES + "/Longshots"
-                    )
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Longshots")
                 }
-                val uri = contentResolver.insert(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    values
-                )
+                val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                 fos = uri?.let { contentResolver.openOutputStream(it) }
             } else {
                 val imagesDir = File(
@@ -492,8 +479,7 @@ class ScreenCaptureService : Service() {
     private fun safeRemoveView(view: View) {
         try {
             windowManager.removeView(view)
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
     }
 
     override fun onDestroy() {
