@@ -378,7 +378,7 @@ class ScreenCaptureService : Service() {
                 capturedFrames.add(CaptureFrame(finalBitmap, distanceScrolled))
             } catch (e: Exception) {
                 Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
-            } block {
+            } finally {
                 showOverlayChrome()
                 onDone()
             }
