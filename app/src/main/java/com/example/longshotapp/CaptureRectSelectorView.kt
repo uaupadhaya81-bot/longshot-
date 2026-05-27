@@ -249,3 +249,4 @@ class CaptureRectSelectorView @JvmOverloads constructor(
 
     private fun dp(value: Float): Float = value * resources.displayMetrics.density
 }
+
