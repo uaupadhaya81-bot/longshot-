@@ -20,16 +20,15 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    # CRITICAL FIX: Generates the missing gradle-wrapper.jar natively on the runner
     - name: Generate Fresh Gradle Wrapper Engine
       run: gradle wrapper
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    - name: Build Debug APK with Full Log Report
-      # The --continue flag forces the compiler to scan every file and show all errors
-      run: ./gradlew compileDebugKotlin --continue
+    - name: Build and Package Debug APK
+      # Changed from compileDebugKotlin to assembleDebug to package the final installer file
+      run: ./gradlew assembleDebug
 
     - name: Upload APK Artifact
       if: success()
