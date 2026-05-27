@@ -34,8 +34,8 @@ class LongshotAccessibilityService : AccessibilityService() {
 
     /**
      * Performs a mathematically precise scroll utilizing a dynamic speed setting,
-     * immediately followed by a secondary 50-pixel slow crawl gesture to absorb 
-     * and kill any remaining inertial kinetic flinging velocity.
+     * immediately followed by a zero-distance static touch hold to absorb 
+     * and kill any remaining inertial kinetic flinging velocity instantly.
      */
     fun scrollExactDistance(scrollRect: Rect, requestedDistancePx: Int, speedIndex: Int, callback: (Int) -> Unit) {
         val centerX = scrollRect.centerX().toFloat()
@@ -57,12 +57,11 @@ class LongshotAccessibilityService : AccessibilityService() {
         }
 
         // --- DYNAMIC SPEED MULTIPLIER LOGIC ---
-        // Maps the UI preferences directly to operational gesture timing profiles
         val (multiplier, floor) = when (speedIndex) {
-            0 -> Pair(8L, 1600L)  // 0.5x Speed (Slower drag)
-            2 -> Pair(2L, 400L)   // 2x Speed (Faster drag)
-            3 -> Pair(1L, 200L)   // 4x Speed (Fastest drag)
-            else -> Pair(4L, 800L) // 1x Speed (Original baseline app default)
+            0 -> Pair(8L, 1600L)  // 0.5x Speed
+            2 -> Pair(2L, 400L)   // 2x Speed
+            3 -> Pair(1L, 200L)   // 4x Speed
+            else -> Pair(4L, 800L) // 1x Speed
         }
         val duration = (actualDistancePx * multiplier).coerceAtLeast(floor)
 
@@ -76,21 +75,21 @@ class LongshotAccessibilityService : AccessibilityService() {
         dispatchGesture(gesture, object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
                 
-                // --- INSTANT SECONDARY BRAKING GESTURE ---
-                // The millisecond the primary gesture concludes, land a 50-pixel 
-                // slow gesture on top of the UI thread to cancel out structural flinging.
+                // --- FIXED AUTOMATED BRAKING GESTURE ---
+                // By matching the start and end coordinates perfectly at endY,
+                // it holds the layout completely static to absorb fluid velocity.
                 val brakePath = Path().apply {
                     moveTo(centerX, endY)
-                    lineTo(centerX, (endY - 50f).coerceAtLeast(scrollRect.top.toFloat()))
+                    lineTo(centerX, endY) 
                 }
 
                 val brakeGesture = GestureDescription.Builder()
-                    .addStroke(GestureDescription.StrokeDescription(brakePath, 0, 600L)) // 600ms intentional dampening
+                    .addStroke(GestureDescription.StrokeDescription(brakePath, 0, 300L)) // 300ms hold is ideal to kill inertia
                     .build()
 
                 dispatchGesture(brakeGesture, object : GestureResultCallback() {
                     override fun onCompleted(stopGestureDescription: GestureDescription?) {
-                        // Allow layout buffers to settle completely before firing the snapshot engine
+                        // Let layout view buffers settle completely before capturing
                         handler.postDelayed({ callback(actualDistancePx) }, 400)
                     }
 
