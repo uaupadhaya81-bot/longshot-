@@ -25,11 +25,31 @@
             android:textSize="16sp"
             android:textStyle="bold" />
 
-        <Button
-            android:id="@+id/btn_lock_frame"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="LOCK FRAME" />
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_cancel_frame"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:backgroundTint="#D32F2F"
+                android:text="CANCEL"
+                android:textColor="@android:color/white" />
+
+            <Button
+                android:id="@+id/btn_lock_frame"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="LOCK FRAME" />
+        </LinearLayout>
+
     </LinearLayout>
 
 </FrameLayout>
+
