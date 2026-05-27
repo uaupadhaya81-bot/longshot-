@@ -10,7 +10,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_centerHorizontal="true"
-        android:layout_marginTop="80dp"
+        android:layout_marginTop="30dp"
         android:text="Offline Longshot Capture"
         android:textSize="24sp"
         android:textStyle="bold"
@@ -21,17 +21,64 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_below="@id/title_text"
-        android:layout_marginTop="20dp"
-        android:text="1. Enable Accessibility Service\n2. Allow overlay permission\n3. Tap Start to begin capture"
-        android:textSize="16sp"
-        android:lineSpacingExtra="6dp"
+        android:layout_marginTop="12dp"
+        android:text="1. Enable Accessibility Service\n2. Allow overlay permission\n3. Set preferences and tap Start"
+        android:textSize="14sp"
+        android:lineSpacingExtra="4dp"
         android:textColor="@android:color/darker_gray" />
+
+    <LinearLayout
+        android:id="@+id/settings_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/instruction_text"
+        android:layout_marginTop="30dp"
+        android:orientation="vertical"
+        android:background="#F5F5F5"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/tv_speed_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Scroll Speed: 1x (Original Default)"
+            android:textColor="@android:color/black"
+            android:textStyle="bold"
+            android:textSize="14sp" />
+
+        <SeekBar
+            android:id="@+id/sb_speed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="20dp"
+            android:max="3"
+            android:progress="1" />
+
+        <TextView
+            android:id="@+id/tv_window_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Scanner Window Size: ±20px (40px Total)"
+            android:textColor="@android:color/black"
+            android:textStyle="bold"
+            android:textSize="14sp" />
+
+        <SeekBar
+            android:id="@+id/sb_window"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:max="80"
+            android:progress="15" />
+    </LinearLayout>
 
     <Button
         android:id="@+id/btn_start"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_centerInParent="true"
+        android:layout_below="@id/settings_container"
+        android:layout_marginTop="40dp"
         android:padding="16dp"
         android:text="Start Longshot Service"
         android:textSize="18sp" />
