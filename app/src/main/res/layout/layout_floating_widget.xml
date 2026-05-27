@@ -8,27 +8,41 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:background="@drawable/floating_widget_bg"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:padding="10dp">
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingLeft="18dp"
+        android:paddingTop="12dp"
+        android:paddingRight="18dp"
+        android:paddingBottom="12dp">
 
         <TextView
             android:id="@+id/button_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="START"
-            android:textColor="@android:color/white"
+            android:textColor="#4CAF50"
             android:textSize="14sp"
-            android:textStyle="bold" />
+            android:textStyle="bold"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"/>
+
+        <View
+            android:layout_width="1.5dp"
+            android:layout_height="16dp"
+            android:layout_marginStart="14dp"
+            android:layout_marginEnd="14dp"
+            android:background="#44FFFFFF" />
 
         <TextView
             android:id="@+id/stop_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
             android:text="STOP"
-            android:textColor="@android:color/white"
-            android:textSize="12sp" />
+            android:textColor="#FF5252"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"/>
 
     </LinearLayout>
 
