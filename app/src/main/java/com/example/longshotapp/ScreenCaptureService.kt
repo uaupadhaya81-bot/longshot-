@@ -56,7 +56,7 @@ class ScreenCaptureService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
 
-    // Now storing our new CaptureFrame objects instead of raw Bitmaps
+    // Storing our CaptureFrame objects instead of raw Bitmaps
     private val capturedFrames = ArrayList<CaptureFrame>()
 
     private var screenWidth = 0
@@ -66,6 +66,10 @@ class ScreenCaptureService : Service() {
     private var selectedFrame: Rect? = null
     private var sessionStarted = false
     private var isFinishingSession = false
+
+    // Configuration values captured from MainActivity's sliders
+    private var currentSpeedIndex = 1
+    private var currentWindowSize = 20
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -97,6 +101,10 @@ class ScreenCaptureService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val resultCode = intent?.getIntExtra("RESULT_CODE", Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
         val dataIntent = intent?.getParcelableExtra<Intent>("DATA_INTENT")
+
+        // Unpack the real-time configuration values selected by the user
+        currentSpeedIndex = intent?.getIntExtra("EXTRA_SPEED_INDEX", 1) ?: 1
+        currentWindowSize = intent?.getIntExtra("EXTRA_WINDOW_SIZE", 20) ?: 20
 
         if (resultCode == Activity.RESULT_OK && dataIntent != null) {
             val mpManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -322,11 +330,11 @@ class ScreenCaptureService : Service() {
 
         hideOverlayChrome()
 
-        // We ask to scroll 75% of the frame height. 
-        // The scroller will execute a slow drag and return the exact pixels moved.
+        // Ask to scroll 75% of the frame height
         val requestedScroll = (frame.height() * 0.75f).toInt()
 
-        scroller.scrollExactDistance(frame, requestedScroll) { actualDistancePx ->
+        // Forward our live speed multiplier preference index into the accessibility engine
+        scroller.scrollExactDistance(frame, requestedScroll, currentSpeedIndex) { actualDistancePx ->
             captureCurrentFrame(actualDistancePx) {
                 showOverlayChrome()
             }
@@ -345,7 +353,6 @@ class ScreenCaptureService : Service() {
         }
     }
 
-    // Now takes the exact distance as a parameter and stores it with the image
     private fun captureCurrentFrame(distanceScrolled: Int, onDone: () -> Unit) {
         if (isFinishingSession) {
             onDone()
@@ -372,6 +379,8 @@ class ScreenCaptureService : Service() {
             } catch (e: Exception) {
                 Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
             } finally {
+                // --- SYNTAX FIX ---
+                // Replaced "block" with "finally" keyword to preserve architecture execution paths
                 showOverlayChrome()
                 onDone()
             }
@@ -419,8 +428,8 @@ class ScreenCaptureService : Service() {
             return
         }
 
-        // Call our new deterministic stitch method
-        val stitchedBitmap = ImageStitcher.stitchExact(capturedFrames)
+        // Pass down the custom scanning window threshold selected on the slider
+        val stitchedBitmap = ImageStitcher.stitchExact(capturedFrames, currentWindowSize)
 
         if (stitchedBitmap != null) {
             saveBitmapToStorage(stitchedBitmap)
@@ -495,3 +504,4 @@ class ScreenCaptureService : Service() {
         selectorRoot = null
     }
 }
+
