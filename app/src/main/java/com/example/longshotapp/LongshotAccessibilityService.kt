@@ -60,7 +60,7 @@ class LongshotAccessibilityService : AccessibilityService() {
         // We force the swipe to take at least 2 milliseconds per pixel (minimum 800ms).
         // This drops the release velocity to near-zero, entirely preventing the 
         // system's automatic kinetic scroll animation.
-        val duration = (actualDistancePx * 2L).coerceAtLeast(800L)
+        val duration = (actualDistancePx * 4L).coerceAtLeast(800L)
 
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
