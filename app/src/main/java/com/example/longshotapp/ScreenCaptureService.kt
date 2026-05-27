@@ -280,6 +280,7 @@ class ScreenCaptureService : Service() {
         val root = LayoutInflater.from(this).inflate(R.layout.layout_frame_selector, null)
         val selector = root.findViewById<CaptureRectSelectorView>(R.id.selector_view)
         val lockButton = root.findViewById<Button>(R.id.btn_lock_frame)
+        val cancelButton = root.findViewById<Button>(R.id.btn_cancel_frame)
 
         selectorView = selector
         selectorRoot = root
@@ -313,6 +314,15 @@ class ScreenCaptureService : Service() {
             updateFloatingText(buttonText)
             Toast.makeText(this, "Frame locked: $frame", Toast.LENGTH_SHORT).show()
         }
+
+        // --- ATTACHED NEW CANCELLATION HANDLER HERE ---
+        cancelButton.setOnClickListener {
+            selectorRoot?.let { safeRemoveView(it) }
+            selectorRoot = null
+            selectorView = null
+            showOverlayChrome()
+            updateFloatingText(buttonText)
+        }
     }
 
     private fun scrollThenCapture(buttonText: TextView) {
@@ -333,7 +343,7 @@ class ScreenCaptureService : Service() {
         // Ask to scroll 75% of the frame height
         val requestedScroll = (frame.height() * 0.75f).toInt()
 
-        // --- TYPE INFERENCE FIX HERE ---
+        // Explicit parameter verification mapping
         scroller.scrollExactDistance(frame, requestedScroll, currentSpeedIndex) { actualDistancePx: Int ->
             captureCurrentFrame(actualDistancePx) {
                 showOverlayChrome()
@@ -379,7 +389,6 @@ class ScreenCaptureService : Service() {
             } catch (e: Exception) {
                 Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
             } finally {
-                // --- SYNTAX TYPO FIX HERE (block replaced with finally) ---
                 showOverlayChrome()
                 onDone()
             }
