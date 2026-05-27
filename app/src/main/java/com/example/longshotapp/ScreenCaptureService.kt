@@ -68,6 +68,9 @@ class ScreenCaptureService : Service() {
 
     // State parameters managing the automation engine loops
     private var isAutoMode = false
+    private var isScrollActive = false
+    private var stopRequestedDuringScroll = false
+    private var manualRequestedDuringScroll = false
 
     private var currentSpeedIndex = 1
     private var currentWindowSize = 20
@@ -194,8 +197,8 @@ class ScreenCaptureService : Service() {
 
         updateFloatingText(buttonText)
 
-        fun finishSession() {
-            isAutoMode = false // Terminate running loops immediately
+        fun finishSessionInternal() {
+            isAutoMode = false 
             if (isFinishingSession) return
             isFinishingSession = true
             
@@ -205,29 +208,48 @@ class ScreenCaptureService : Service() {
             dividerAuto.visibility = View.GONE
             stopText.isEnabled = false
             
-            hideOverlayChrome()
+            hideOverlayChromeFully()
             selectorRoot?.let { safeRemoveView(it) }
             selectorRoot = null
             processAndStitchImages()
         }
 
-        stopText.setOnClickListener { finishSession() }
+        stopText.setOnClickListener { 
+            if (isFinishingSession) return@setOnClickListener
+            
+            if (isScrollActive) {
+                stopRequestedDuringScroll = true
+                stopText.text = "WAIT..."
+                stopText.setTextColor(0xFFE57373.toInt())
+                isAutoMode = false
+                return@setOnClickListener
+            }
+            finishSessionInternal() 
+        }
 
         autoText.setOnClickListener {
             if (isFinishingSession || !sessionStarted) return@setOnClickListener
 
+            if (isScrollActive) {
+                if (isAutoMode) {
+                    manualRequestedDuringScroll = true
+                    autoText.text = "WAIT..."
+                    autoText.setTextColor(0xFFFFC107.toInt())
+                }
+                return@setOnClickListener
+            }
+
             isAutoMode = !isAutoMode
             if (isAutoMode) {
                 autoText.text = "MANUAL"
-                autoText.setTextColor(0xFFFF9800.toInt()) // Set to warm warning Amber color
+                autoText.setTextColor(0xFFFF9800.toInt())
                 buttonText.visibility = View.GONE
                 dividerAuto.visibility = View.GONE
                 
-                // Immediately kickstart the iterative execution wheel
                 triggerNextAutoScroll(buttonText, autoText)
             } else {
                 autoText.text = "AUTO"
-                autoText.setTextColor(0xFF00BCD4.toInt()) // Return to standard sharp Cyan
+                autoText.setTextColor(0xFF00BCD4.toInt())
                 buttonText.visibility = View.VISIBLE
                 dividerAuto.visibility = View.VISIBLE
             }
@@ -235,7 +257,7 @@ class ScreenCaptureService : Service() {
 
         val gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                if (isFinishingSession) return true
+                if (isFinishingSession || isScrollActive) return true
 
                 if (selectedFrame == null) {
                     showFrameSelector(buttonText, autoText, dividerAuto)
@@ -244,7 +266,6 @@ class ScreenCaptureService : Service() {
                         captureCurrentFrame(0) {
                             sessionStarted = true
                             buttonText.text = "SCROLL"
-                            // Reveal the automation control system layouts
                             autoText.visibility = View.VISIBLE
                             dividerAuto.visibility = View.VISIBLE
                         }
@@ -256,7 +277,14 @@ class ScreenCaptureService : Service() {
             }
 
             override fun onLongPress(e: MotionEvent) {
-                finishSession()
+                if (isScrollActive) {
+                    stopRequestedDuringScroll = true
+                    stopText.text = "WAIT..."
+                    stopText.setTextColor(0xFFE57373.toInt())
+                    isAutoMode = false
+                } else {
+                    finishSessionInternal()
+                }
             }
         })
 
@@ -305,7 +333,7 @@ class ScreenCaptureService : Service() {
     private fun showFrameSelector(buttonText: TextView, autoText: TextView, dividerAuto: View) {
         if (selectorRoot != null) return
 
-        hideOverlayChrome()
+        hideOverlayChromeFully()
 
         val root = LayoutInflater.from(this).inflate(R.layout.layout_frame_selector, null)
         val selector = root.findViewById<CaptureRectSelectorView>(R.id.selector_view)
@@ -340,7 +368,7 @@ class ScreenCaptureService : Service() {
             selectorRoot?.let { safeRemoveView(it) }
             selectorRoot = null
             selectorView = null
-            showOverlayChrome()
+            showOverlayChromeFully()
             updateFloatingText(buttonText)
             
             autoText.visibility = View.GONE
@@ -352,15 +380,13 @@ class ScreenCaptureService : Service() {
             selectorRoot?.let { safeRemoveView(it) }
             selectorRoot = null
             selectorView = null
-            showOverlayChrome()
+            showOverlayChromeFully()
             updateFloatingText(buttonText)
             
             autoText.visibility = View.GONE
             dividerAuto.visibility = View.GONE
         }
-    }
-
-    private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = null) {
+            private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = null) {
         val frame = selectedFrame ?: run {
             updateFloatingText(buttonText)
             onComplete?.invoke()
@@ -369,48 +395,91 @@ class ScreenCaptureService : Service() {
 
         val scroller = LongshotAccessibilityService.instance
         if (scroller == null) {
-            showOverlayChrome()
+            showOverlayChromeFully()
             Toast.makeText(this, "Enable Accessibility Service first.", Toast.LENGTH_LONG).show()
             isAutoMode = false
             onComplete?.invoke()
             return
         }
 
-        hideOverlayChrome()
+        isScrollActive = true
+
+        if (!isAutoMode) {
+            hideOverlayChromeFully()
+        }
 
         val requestedScroll = (frame.height() * 0.75f).toInt()
 
         scroller.scrollExactDistance(frame, requestedScroll, currentSpeedIndex) { actualDistancePx: Int ->
             captureCurrentFrame(actualDistancePx) {
-                showOverlayChrome()
+                isScrollActive = false
+                
+                val autoText = floatingView.findViewById<TextView>(R.id.auto_text)
+                val dividerAuto = floatingView.findViewById<View>(R.id.divider_auto)
+                val stopText = floatingView.findViewById<TextView>(R.id.stop_text)
+
+                if (stopRequestedDuringScroll) {
+                    stopRequestedDuringScroll = false
+                    isAutoMode = false
+                    
+                    stopText.text = "STOP"
+                    stopText.setTextColor(0xFFFF5252.toInt())
+                    
+                    buttonText.text = "STITCHING..."
+                    buttonText.visibility = View.VISIBLE
+                    autoText.visibility = View.GONE
+                    dividerAuto.visibility = View.GONE
+                    stopText.isEnabled = false
+                    
+                    hideOverlayChromeFully()
+                    selectorRoot?.let { safeRemoveView(it) }
+                    selectorRoot = null
+                    processAndStitchImages()
+                    onComplete?.invoke()
+                    return@scrollExactDistance
+                }
+
+                if (manualRequestedDuringScroll) {
+                    manualRequestedDuringScroll = false
+                    isAutoMode = false
+                    
+                    autoText.text = "AUTO"
+                    autoText.setTextColor(0xFF00BCD4.toInt())
+                    buttonText.visibility = View.VISIBLE
+                    dividerAuto.visibility = View.VISIBLE
+                    
+                    showOverlayChromeFully()
+                    onComplete?.invoke() 
+                    return@scrollExactDistance
+                }
+
+                if (!isAutoMode) {
+                    showOverlayChromeFully()
+                }
                 onComplete?.invoke()
             }
         }
     }
 
-    // --- AUTOMATION SCHEDULER ENGINE ---
     private fun triggerNextAutoScroll(buttonText: TextView, autoText: TextView) {
         if (!isAutoMode || isFinishingSession) return
 
-        // 450ms cooldown allows ample buffer time for the target application to update views
         mainHandler.postDelayed({
-            // --- FIX ENFORCED HERE: Explicitly scoped exit label tag ---
-            if (!isAutoMode || isFinishingSession) return@postDelayed
+            if (!isAutoMode || isFinishingSession || manualRequestedDuringScroll || stopRequestedDuringScroll) return@postDelayed
 
             scrollThenCapture(buttonText) {
-                // Cascades cleanly into the subsequent iteration loop once processing cycle completely wraps up
                 triggerNextAutoScroll(buttonText, autoText)
             }
         }, 450)
     }
 
-    private fun hideOverlayChrome() {
+    private fun hideOverlayChromeFully() {
         if (::floatingView.isInitialized) {
             floatingView.visibility = View.GONE
         }
     }
 
-    private fun showOverlayChrome() {
+    private fun showOverlayChromeFully() {
         if (::floatingView.isInitialized && !isFinishingSession) {
             floatingView.visibility = View.VISIBLE
         }
@@ -422,7 +491,7 @@ class ScreenCaptureService : Service() {
             return
         }
 
-        hideOverlayChrome()
+        hideOverlayChromeFully()
 
         mainHandler.postDelayed({
             try {
@@ -442,7 +511,9 @@ class ScreenCaptureService : Service() {
             } catch (e: Exception) {
                 Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
             } finally {
-                showOverlayChrome()
+                if (isAutoMode && !stopRequestedDuringScroll && !manualRequestedDuringScroll) {
+                    showOverlayChromeFully()
+                }
                 onDone()
             }
         }, 500)
@@ -538,7 +609,7 @@ class ScreenCaptureService : Service() {
         }
     }
 
-        private fun cleanUpEngine() {
+    private fun cleanUpEngine() {
         virtualDisplay?.release()
         virtualDisplay = null
         imageReader?.close()
@@ -564,4 +635,7 @@ class ScreenCaptureService : Service() {
         selectorRoot?.let { safeRemoveView(it) }
         selectorRoot = null
     }
-}
+    }
+    
+    }
+    
