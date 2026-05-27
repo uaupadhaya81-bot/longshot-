@@ -56,7 +56,6 @@ class ScreenCaptureService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
 
-    // Storing our CaptureFrame objects instead of raw Bitmaps
     private val capturedFrames = ArrayList<CaptureFrame>()
 
     private var screenWidth = 0
@@ -67,7 +66,9 @@ class ScreenCaptureService : Service() {
     private var sessionStarted = false
     private var isFinishingSession = false
 
-    // Configuration values captured from MainActivity's sliders
+    // State parameters managing the automation engine loops
+    private var isAutoMode = false
+
     private var currentSpeedIndex = 1
     private var currentWindowSize = 20
 
@@ -102,7 +103,6 @@ class ScreenCaptureService : Service() {
         val resultCode = intent?.getIntExtra("RESULT_CODE", Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
         val dataIntent = intent?.getParcelableExtra<Intent>("DATA_INTENT")
 
-        // Unpack the real-time configuration values selected by the user
         currentSpeedIndex = intent?.getIntExtra("EXTRA_SPEED_INDEX", 1) ?: 1
         currentWindowSize = intent?.getIntExtra("EXTRA_WINDOW_SIZE", 20) ?: 20
 
@@ -188,15 +188,23 @@ class ScreenCaptureService : Service() {
         windowManager.addView(floatingView, floatingParams)
 
         val buttonText = floatingView.findViewById<TextView>(R.id.button_text)
+        val autoText = floatingView.findViewById<TextView>(R.id.auto_text)
         val stopText = floatingView.findViewById<TextView>(R.id.stop_text)
+        val dividerAuto = floatingView.findViewById<View>(R.id.divider_auto)
 
         updateFloatingText(buttonText)
 
         fun finishSession() {
+            isAutoMode = false // Terminate running loops immediately
             if (isFinishingSession) return
             isFinishingSession = true
+            
             buttonText.text = "STITCHING..."
+            buttonText.visibility = View.VISIBLE
+            autoText.visibility = View.GONE
+            dividerAuto.visibility = View.GONE
             stopText.isEnabled = false
+            
             hideOverlayChrome()
             selectorRoot?.let { safeRemoveView(it) }
             selectorRoot = null
@@ -205,18 +213,41 @@ class ScreenCaptureService : Service() {
 
         stopText.setOnClickListener { finishSession() }
 
+        // --- AUTOMATED LOOPING INTERFACE TOGGLE ---
+        autoText.setOnClickListener {
+            if (isFinishingSession || !sessionStarted) return@setOnClickListener
+
+            isAutoMode = !isAutoMode
+            if (isAutoMode) {
+                autoText.text = "MANUAL"
+                autoText.setTextColor(0xFFFF9800.toInt()) // Set to warm warning Amber color
+                buttonText.visibility = View.GONE
+                dividerAuto.visibility = View.GONE
+                
+                // Immediately kickstart the iterative execution wheel
+                triggerNextAutoScroll(buttonText, autoText)
+            } else {
+                autoText.text = "AUTO"
+                autoText.setTextColor(0xFF00BCD4.toInt()) // Return to standard sharp Cyan
+                buttonText.visibility = View.VISIBLE
+                dividerAuto.visibility = View.VISIBLE
+            }
+        }
+
         val gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 if (isFinishingSession) return true
 
                 if (selectedFrame == null) {
-                    showFrameSelector(buttonText)
+                    showFrameSelector(buttonText, autoText, dividerAuto)
                 } else {
                     if (!sessionStarted) {
-                        // First capture has a scroll distance of 0
                         captureCurrentFrame(0) {
                             sessionStarted = true
                             buttonText.text = "SCROLL"
+                            // Reveal the automation control system layouts
+                            autoText.visibility = View.VISIBLE
+                            dividerAuto.visibility = View.VISIBLE
                         }
                     } else {
                         scrollThenCapture(buttonText)
@@ -272,7 +303,7 @@ class ScreenCaptureService : Service() {
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun showFrameSelector(buttonText: TextView) {
+    private fun showFrameSelector(buttonText: TextView, autoText: TextView, dividerAuto: View) {
         if (selectorRoot != null) return
 
         hideOverlayChrome()
@@ -312,22 +343,29 @@ class ScreenCaptureService : Service() {
             selectorView = null
             showOverlayChrome()
             updateFloatingText(buttonText)
+            
+            autoText.visibility = View.GONE
+            dividerAuto.visibility = View.GONE
             Toast.makeText(this, "Frame locked: $frame", Toast.LENGTH_SHORT).show()
         }
 
-        // --- ATTACHED NEW CANCELLATION HANDLER HERE ---
         cancelButton.setOnClickListener {
             selectorRoot?.let { safeRemoveView(it) }
             selectorRoot = null
             selectorView = null
             showOverlayChrome()
             updateFloatingText(buttonText)
+            
+            autoText.visibility = View.GONE
+            dividerAuto.visibility = View.GONE
         }
     }
 
-    private fun scrollThenCapture(buttonText: TextView) {
+    // --- RE-ENGINEERED PIPELINE ENABLING AN ITERATIVE ASYNC CALLBACK LOOP ---
+    private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = null) {
         val frame = selectedFrame ?: run {
             updateFloatingText(buttonText)
+            onComplete?.invoke()
             return
         }
 
@@ -335,20 +373,36 @@ class ScreenCaptureService : Service() {
         if (scroller == null) {
             showOverlayChrome()
             Toast.makeText(this, "Enable Accessibility Service first.", Toast.LENGTH_LONG).show()
+            isAutoMode = false
+            onComplete?.invoke()
             return
         }
 
         hideOverlayChrome()
 
-        // Ask to scroll 75% of the frame height
         val requestedScroll = (frame.height() * 0.75f).toInt()
 
-        // Explicit parameter verification mapping
         scroller.scrollExactDistance(frame, requestedScroll, currentSpeedIndex) { actualDistancePx: Int ->
             captureCurrentFrame(actualDistancePx) {
                 showOverlayChrome()
+                onComplete?.invoke()
             }
         }
+    }
+
+    // --- AUTOMATION SCHEDULER ENGINE ---
+    private fun triggerNextAutoScroll(buttonText: TextView, autoText: TextView) {
+        if (!isAutoMode || isFinishingSession) return
+
+        // 450ms cooldown allows ample buffer time for the target application to update views
+        mainHandler.postDelayed({
+            if (!isAutoMode || isFinishingSession) return
+
+            scrollThenCapture(buttonText) {
+                // Cascades cleanly into the subsequent iteration loop once processing cycle completely wraps up
+                triggerNextAutoScroll(buttonText, autoText)
+            }
+        }, 450)
     }
 
     private fun hideOverlayChrome() {
@@ -436,7 +490,6 @@ class ScreenCaptureService : Service() {
             return
         }
 
-        // Pass down the custom scanning window threshold selected on the slider
         val stitchedBitmap = ImageStitcher.stitchExact(capturedFrames, currentWindowSize)
 
         if (stitchedBitmap != null) {
@@ -483,32 +536,4 @@ class ScreenCaptureService : Service() {
             }
         } catch (e: Exception) {
             Toast.makeText(this, "Failed to save: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun cleanUpEngine() {
-        virtualDisplay?.release()
-        virtualDisplay = null
-        imageReader?.close()
-        imageReader = null
-    }
-
-    private fun safeRemoveView(view: View) {
-        try {
-            windowManager.removeView(view)
-        } catch (_: Exception) {}
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        cleanUpEngine()
-        mediaProjection?.stop()
-
-        if (::floatingView.isInitialized) {
-            safeRemoveView(floatingView)
-        }
-
-        selectorRoot?.let { safeRemoveView(it) }
-        selectorRoot = null
-    }
-}
+            
