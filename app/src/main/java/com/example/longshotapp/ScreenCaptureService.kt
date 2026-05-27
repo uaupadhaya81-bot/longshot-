@@ -333,8 +333,9 @@ class ScreenCaptureService : Service() {
         // Ask to scroll 75% of the frame height
         val requestedScroll = (frame.height() * 0.75f).toInt()
 
-        // Forward our live speed multiplier preference index into the accessibility engine
-        scroller.scrollExactDistance(frame, requestedScroll, currentSpeedIndex) { actualDistancePx ->
+        // --- EXPLICIT TYPE INFERENCE FIX ---
+        // Explicitly cast lambda signature parameter type to (actualDistancePx: Int) to resolve compiler ambiguity
+        scroller.scrollExactDistance(frame, requestedScroll, currentSpeedIndex) { actualDistancePx: Int ->
             captureCurrentFrame(actualDistancePx) {
                 showOverlayChrome()
             }
@@ -379,8 +380,6 @@ class ScreenCaptureService : Service() {
             } catch (e: Exception) {
                 Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
             } finally {
-                // --- SYNTAX FIX ---
-                // Replaced "block" with "finally" keyword to preserve architecture execution paths
                 showOverlayChrome()
                 onDone()
             }
@@ -504,4 +503,3 @@ class ScreenCaptureService : Service() {
         selectorRoot = null
     }
 }
-
