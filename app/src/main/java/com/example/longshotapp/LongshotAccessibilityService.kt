@@ -76,33 +76,31 @@ class LongshotAccessibilityService : AccessibilityService() {
             override fun onCompleted(gestureDescription: GestureDescription?) {
                 
                 // --- FIXED AUTOMATED BRAKING GESTURE ---
-                // By matching the start and end coordinates perfectly at endY,
-                // it holds the layout completely static to absorb fluid velocity.
                 val brakePath = Path().apply {
                     moveTo(centerX, endY)
                     lineTo(centerX, endY) 
                 }
 
                 val brakeGesture = GestureDescription.Builder()
-                    .addStroke(GestureDescription.StrokeDescription(brakePath, 0, 300L)) // 300ms hold is ideal to kill inertia
+                    .addStroke(GestureDescription.StrokeDescription(brakePath, 0, 300L)) // 300ms hold kills inertia completely
                     .build()
 
                 dispatchGesture(brakeGesture, object : GestureResultCallback() {
                     override fun onCompleted(stopGestureDescription: GestureDescription?) {
-                        // Let layout view buffers settle completely before capturing
-                        handler.postDelayed({ callback(actualDistancePx) }, 400)
+                        // --- SPEED OPTIMIZATION TUNING ---
+                        // Reduced from 400ms to 150ms. Safe hardware render window.
+                        handler.postDelayed({ callback(actualDistancePx) }, 150)
                     }
 
                     override fun onCancelled(stopGestureDescription: GestureDescription?) {
-                        handler.postDelayed({ callback(actualDistancePx) }, 400)
+                        handler.postDelayed({ callback(actualDistancePx) }, 150)
                     }
                 }, handler)
             }
 
             override fun onCancelled(gestureDescription: GestureDescription?) {
-                handler.postDelayed({ callback(0) }, 200)
+                handler.postDelayed({ callback(0) }, 150)
             }
         }, handler)
     }
 }
-
