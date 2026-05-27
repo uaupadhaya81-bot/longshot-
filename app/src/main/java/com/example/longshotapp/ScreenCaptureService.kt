@@ -536,4 +536,33 @@ class ScreenCaptureService : Service() {
             }
         } catch (e: Exception) {
             Toast.makeText(this, "Failed to save: ${e.message}", Toast.LENGTH_SHORT).show()
-            
+        }
+    }
+
+    private fun cleanUpEngine() {
+        virtualDisplay?.release()
+        virtualDisplay = null
+        imageReader?.close()
+        imageReader = null
+    }
+
+    private fun safeRemoveView(view: View) {
+        try {
+            windowManager.removeView(view)
+        } catch (_: Exception) {}
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        isAutoMode = false
+        cleanUpEngine()
+        mediaProjection?.stop()
+
+        if (::floatingView.isInitialized) {
+            safeRemoveView(floatingView)
+        }
+
+        selectorRoot?.let { safeRemoveView(it) }
+        selectorRoot = null
+    }
+}    
