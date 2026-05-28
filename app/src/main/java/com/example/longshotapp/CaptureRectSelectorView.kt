@@ -44,7 +44,10 @@ class CaptureRectSelectorView @JvmOverloads constructor(
 
     private val minSize = dp(160f)
     private val handleRadius = dp(14f)
-    private val touchSlop = dp(24f)
+    
+    // INCREASED SLOP: This makes the invisible touch target for corners much larger. 
+    // You can grab it easily even if it is jammed into the physical edge of the screen.
+    private val touchSlop = dp(50f) 
 
     private enum class DragMode {
         NONE, MOVE, TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT
@@ -56,7 +59,6 @@ class CaptureRectSelectorView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-
         if (frame.isEmpty) {
             val left = w * 0.10f
             val top = h * 0.18f
@@ -68,12 +70,10 @@ class CaptureRectSelectorView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-
         canvas.drawRect(0f, 0f, width.toFloat(), frame.top, scrimPaint)
         canvas.drawRect(0f, frame.top, frame.left, frame.bottom, scrimPaint)
         canvas.drawRect(frame.right, frame.top, width.toFloat(), frame.bottom, scrimPaint)
         canvas.drawRect(0f, frame.bottom, width.toFloat(), height.toFloat(), scrimPaint)
-
         canvas.drawRect(frame, borderPaint)
 
         drawHandle(canvas, frame.left, frame.top)
@@ -95,11 +95,9 @@ class CaptureRectSelectorView @JvmOverloads constructor(
                 dragMode = hitTest(event.x, event.y)
                 return true
             }
-
             MotionEvent.ACTION_MOVE -> {
                 val dx = event.x - lastX
                 val dy = event.y - lastY
-
                 when (dragMode) {
                     DragMode.MOVE -> moveFrame(dx, dy)
                     DragMode.TOP_LEFT -> resizeTopLeft(dx, dy)
@@ -108,13 +106,11 @@ class CaptureRectSelectorView @JvmOverloads constructor(
                     DragMode.BOTTOM_RIGHT -> resizeBottomRight(dx, dy)
                     DragMode.NONE -> Unit
                 }
-
                 lastX = event.x
                 lastY = event.y
                 invalidate()
                 return true
             }
-
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_CANCEL -> {
                 dragMode = DragMode.NONE
@@ -139,12 +135,7 @@ class CaptureRectSelectorView @JvmOverloads constructor(
     }
 
     fun setFrameRect(rect: Rect) {
-        frame.set(
-            rect.left.toFloat(),
-            rect.top.toFloat(),
-            rect.right.toFloat(),
-            rect.bottom.toFloat()
-        )
+        frame.set(rect.left.toFloat(), rect.top.toFloat(), rect.right.toFloat(), rect.bottom.toFloat())
         clampToBounds()
         invalidate()
     }
@@ -191,12 +182,7 @@ class CaptureRectSelectorView @JvmOverloads constructor(
         clampToBounds()
     }
 
-    private fun enforceMinSize(
-        left: Boolean = false,
-        top: Boolean = false,
-        right: Boolean = false,
-        bottom: Boolean = false
-    ) {
+    private fun enforceMinSize(left: Boolean = false, top: Boolean = false, right: Boolean = false, bottom: Boolean = false) {
         if (frame.width() < minSize) {
             if (left) frame.left = frame.right - minSize
             if (right) frame.right = frame.left + minSize
@@ -211,22 +197,10 @@ class CaptureRectSelectorView @JvmOverloads constructor(
         val maxW = width.toFloat()
         val maxH = height.toFloat()
 
-        if (frame.left < 0f) {
-            val diff = -frame.left
-            frame.offset(diff, 0f)
-        }
-        if (frame.top < 0f) {
-            val diff = -frame.top
-            frame.offset(0f, diff)
-        }
-        if (frame.right > maxW) {
-            val diff = frame.right - maxW
-            frame.offset(-diff, 0f)
-        }
-        if (frame.bottom > maxH) {
-            val diff = frame.bottom - maxH
-            frame.offset(0f, -diff)
-        }
+        if (frame.left < 0f) frame.offset(-frame.left, 0f)
+        if (frame.top < 0f) frame.offset(0f, -frame.top)
+        if (frame.right > maxW) frame.offset(-(frame.right - maxW), 0f)
+        if (frame.bottom > maxH) frame.offset(0f, -(frame.bottom - maxH))
 
         frame.left = frame.left.coerceAtLeast(0f)
         frame.top = frame.top.coerceAtLeast(0f)
