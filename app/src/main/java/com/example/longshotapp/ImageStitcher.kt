@@ -249,3 +249,55 @@ object ImageStitcher {
         return dr + dg + db
     }
 }
+
+
+    /**
+     * Cascades backwards from the end of the list.
+     * If the last two frames are identical, it discards the last one and repeats.
+     */
+    private fun pruneDeadEndFrames(loadedFrames: ArrayList<LoadedFrame>) {
+        while (loadedFrames.size >= 2) {
+            val lastFrame = loadedFrames[loadedFrames.size - 1]
+            val secondLastFrame = loadedFrames[loadedFrames.size - 2]
+
+            if (areBitmapsIdenticalFast(secondLastFrame.bitmap, lastFrame.bitmap)) {
+                // The images are identical (scroll hit the bottom). 
+                // Recycle the duplicate bitmap to free RAM, then remove it from the list.
+                lastFrame.bitmap.recycle()
+                loadedFrames.removeAt(loadedFrames.size - 1)
+            } else {
+                // We found two distinct images! The cascading check is complete.
+                break
+            }
+        }
+    }
+
+    /**
+     * Samples 1000 fixed-random pixels. Extremely fast because it exits 
+     * on the very first mismatched pixel it finds.
+     */
+    private fun areBitmapsIdenticalFast(b1: Bitmap, b2: Bitmap): Boolean {
+        // If dimensions don't match, they obviously aren't identical
+        if (b1.width != b2.width || b1.height != b2.height) return false
+
+        // Use a fixed seed (e.g., 42). This ensures that every time this function runs,
+        // it checks the exact same 1000 coordinate spread, guaranteeing consistency.
+        val random = java.util.Random(42)
+        val w = b1.width
+        val h = b1.height
+
+        for (i in 0 until 1000) {
+            val x = random.nextInt(w)
+            val y = random.nextInt(h)
+
+            // The absolute fastest way to check: exit immediately upon first failure
+            if (b1.getPixel(x, y) != b2.getPixel(x, y)) {
+                return false
+            }
+        }
+
+        // If it survives 1000 randomized coordinate checks without a single mismatch, 
+        // the images are identical.
+        return true
+    }
+    
