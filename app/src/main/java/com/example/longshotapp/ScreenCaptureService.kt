@@ -174,6 +174,7 @@ class ScreenCaptureService : Service() {
 
         startForeground(1, notification)
     }
+
     @SuppressLint("ClickableViewAccessibility")
     private fun createFloatingWidget() {
         floatingView = LayoutInflater.from(this).inflate(R.layout.layout_floating_widget, null)
@@ -397,8 +398,7 @@ class ScreenCaptureService : Service() {
             dividerAuto.visibility = View.GONE
         }
     }
-
-    private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = null) {
+private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = null) {
         val frame = selectedFrame ?: run {
             updateFloatingText(buttonText)
             onComplete?.invoke()
@@ -468,6 +468,7 @@ class ScreenCaptureService : Service() {
                 if (!isAutoMode) {
                     showOverlayChromeFully()
                 }
+
                 onComplete?.invoke()
             }
         }
