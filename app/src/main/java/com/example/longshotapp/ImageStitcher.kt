@@ -49,11 +49,16 @@ object ImageStitcher {
                 val currentBitmap = loadedFrames[i].bitmap
 
                 val expectedScroll = loadedFrames[i].frame.scrollDistance
+                
+                // NEW: Check if this is the very last frame in the sequence
+                val isLastFrame = (i == loadedFrames.size - 1)
+
                 val adjustedScroll = findMicroAlignment(
                     prevBitmap = prevBitmap,
                     currentBitmap = currentBitmap,
                     expectedScroll = expectedScroll,
-                    windowSize = windowSize
+                    windowSize = windowSize,
+                    isLastFrame = isLastFrame
                 ).coerceAtLeast(1)
 
                 currentYOffset += adjustedScroll
@@ -157,17 +162,30 @@ object ImageStitcher {
         prevBitmap: Bitmap,
         currentBitmap: Bitmap,
         expectedScroll: Int,
-        windowSize: Int
+        windowSize: Int,
+        isLastFrame: Boolean
     ): Int {
         val width = prevBitmap.width
         val expectedOverlap = prevBitmap.height - expectedScroll
 
-        if (expectedOverlap < 50) return expectedScroll
+        if (expectedOverlap < 50 && !isLastFrame) return expectedScroll
 
-        val searchMin = (expectedOverlap - windowSize).coerceAtLeast(1)
-        val searchMax = (expectedOverlap + windowSize)
-            .coerceAtMost(prevBitmap.height - 1)
-            .coerceAtMost(currentBitmap.height - 1)
+        // --- NEW LOGIC: Dynamic Search Bounds ---
+        val searchMin: Int
+        val searchMax: Int
+
+        if (isLastFrame) {
+            // It's the last frame! It might be a partial scroll.
+            // Ignore the windowSize and search the ENTIRE overlapping height.
+            searchMin = 1
+            searchMax = (prevBitmap.height - 1).coerceAtMost(currentBitmap.height - 1)
+        } else {
+            // Normal frame. It scrolled fully, so keep it fast and search only the tiny window.
+            searchMin = (expectedOverlap - windowSize).coerceAtLeast(1)
+            searchMax = (expectedOverlap + windowSize)
+                .coerceAtMost(prevBitmap.height - 1)
+                .coerceAtMost(currentBitmap.height - 1)
+        }
 
         val sampleXs = IntArray(10) { i ->
             val rawX = width * (i + 1) / 11
@@ -243,4 +261,3 @@ object ImageStitcher {
         return squaredDistance < 900
     }
 }
-
