@@ -6,62 +6,72 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 object ImageStitcher {
+
+    private data class LoadedFrame(
+        val frame: CaptureFrame,
+        val bitmap: Bitmap
+    )
 
     fun stitchExact(frames: List<CaptureFrame>, windowSize: Int): Bitmap? {
         if (frames.isEmpty()) return null
 
-        val firstBitmap = loadBitmap(frames.first().filePath) ?: return null
-        if (frames.size == 1) return firstBitmap
-
-        val width = firstBitmap.width
-        val offsets = IntArray(frames.size)
-        offsets[0] = 0
-
-        var currentYOffset = 0
-        var totalHeight = firstBitmap.height
-        var prevBitmap = firstBitmap
+        val loadedFrames = ArrayList<LoadedFrame>(frames.size)
 
         try {
-            for (i in 1 until frames.size) {
-                val currentBitmap = loadBitmap(frames[i].filePath) ?: run {
-                    prevBitmap.recycle()
-                    return null
-                }
+            for (frame in frames) {
+                val bitmap = loadBitmap(frame.filePath) ?: return null
+                loadedFrames.add(LoadedFrame(frame, bitmap))
+            }
 
-                val expectedScroll = frames[i].scrollDistance
+            if (loadedFrames.size == 1) {
+                return loadedFrames.first().bitmap
+            }
+
+            val width = loadedFrames.first().bitmap.width
+            val offsets = IntArray(loadedFrames.size)
+            offsets[0] = 0
+
+            var currentYOffset = 0
+            var totalHeight = loadedFrames.first().bitmap.height
+
+            for (i in 1 until loadedFrames.size) {
+                val prevBitmap = loadedFrames[i - 1].bitmap
+                val currentBitmap = loadedFrames[i].bitmap
+
+                val expectedScroll = loadedFrames[i].frame.scrollDistance
                 val adjustedScroll = findMicroAlignment(
                     prevBitmap = prevBitmap,
                     currentBitmap = currentBitmap,
                     expectedScroll = expectedScroll,
                     windowSize = windowSize
-                )
+                ).coerceAtLeast(1)
 
                 currentYOffset += adjustedScroll
                 offsets[i] = currentYOffset
                 totalHeight = currentYOffset + currentBitmap.height
-
-                prevBitmap.recycle()
-                prevBitmap = currentBitmap
             }
+
+            if (width <= 0 || totalHeight <= 0) return null
+
+            val resultBitmap = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(resultBitmap)
+            val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+
+            for (i in loadedFrames.indices) {
+                val bitmap = loadedFrames[i].bitmap
+                canvas.drawBitmap(bitmap, 0f, offsets[i].toFloat(), paint)
+            }
+
+            return resultBitmap
+        } catch (_: Exception) {
+            return null
         } finally {
-            if (!prevBitmap.isRecycled) {
-                prevBitmap.recycle()
-            }
+            recycleAll(loadedFrames)
         }
-
-        val resultBitmap = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.RGB_565)
-        val canvas = Canvas(resultBitmap)
-        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-
-        for (i in frames.indices) {
-            val bitmap = loadBitmap(frames[i].filePath) ?: continue
-            canvas.drawBitmap(bitmap, 0f, offsets[i].toFloat(), paint)
-            bitmap.recycle()
-        }
-
-        return resultBitmap
     }
 
     private fun loadBitmap(path: String): Bitmap? {
@@ -72,6 +82,17 @@ object ImageStitcher {
             BitmapFactory.decodeFile(path, options)
         } catch (_: Exception) {
             null
+        }
+    }
+
+    private fun recycleAll(frames: List<LoadedFrame>) {
+        for (loaded in frames) {
+            try {
+                if (!loaded.bitmap.isRecycled) {
+                    loaded.bitmap.recycle()
+                }
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -91,7 +112,11 @@ object ImageStitcher {
             .coerceAtMost(prevBitmap.height - 1)
             .coerceAtMost(currentBitmap.height - 1)
 
-        val sampleXs = IntArray(10) { i -> width * (i + 1) / 11 }
+        val sampleXs = IntArray(10) { i ->
+            val rawX = width * (i + 1) / 11
+            rawX.coerceIn(0, max(0, width - 1))
+        }
+
         val dominantBgColor = extractDominantBackgroundColor(prevBitmap)
 
         var bestOverlap = expectedOverlap
@@ -105,7 +130,8 @@ object ImageStitcher {
                 val rowPrev = prevBitmap.height - testOverlap + rowOffset
                 val rowCurr = rowOffset
 
-                if (rowPrev >= prevBitmap.height || rowCurr >= currentBitmap.height) continue
+                if (rowPrev !in 0 until prevBitmap.height) continue
+                if (rowCurr !in 0 until currentBitmap.height) continue
 
                 for (x in sampleXs) {
                     val p1 = prevBitmap.getPixel(x, rowPrev)
@@ -137,9 +163,12 @@ object ImageStitcher {
         val colorCounts = HashMap<Int, Int>()
         val step = (bitmap.height / 20).coerceAtLeast(1)
 
+        val sampleLeftX = 5.coerceAtMost(max(0, bitmap.width - 1))
+        val sampleRightX = (bitmap.width - 5).coerceIn(0, max(0, bitmap.width - 1))
+
         for (y in 0 until bitmap.height step step) {
-            val leftColor = bitmap.getPixel(5, y)
-            val rightColor = bitmap.getPixel(bitmap.width - 5, y)
+            val leftColor = bitmap.getPixel(sampleLeftX, y)
+            val rightColor = bitmap.getPixel(sampleRightX, y)
 
             colorCounts[leftColor] = colorCounts.getOrDefault(leftColor, 0) + 1
             colorCounts[rightColor] = colorCounts.getOrDefault(rightColor, 0) + 1
