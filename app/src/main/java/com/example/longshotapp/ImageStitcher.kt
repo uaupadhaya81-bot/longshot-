@@ -5,7 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import kotlin.math.abs
-import kotlin.math.sqrt
 
 object ImageStitcher {
 
@@ -38,7 +37,8 @@ object ImageStitcher {
             totalHeight = currentYOffset + currentBitmap.height
         }
 
-        val resultBitmap = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
+        // RAM OPTIMIZATION: Switched from ARGB_8888 to RGB_565 to cut memory usage in half
+        val resultBitmap = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.RGB_565)
         val canvas = Canvas(resultBitmap)
         val paint = Paint(Paint.FILTER_BITMAP_FLAG)
 
@@ -136,17 +136,16 @@ object ImageStitcher {
 
     /**
      * Calculates the Euclidean distance between two colors in the RGB "Color Cube".
-     * If the distance is less than 30, it is considered the same shade.
      */
     private fun isColorSimilar(c1: Int, c2: Int): Boolean {
         val rDiff = Color.red(c1) - Color.red(c2)
         val gDiff = Color.green(c1) - Color.green(c2)
         val bDiff = Color.blue(c1) - Color.blue(c2)
         
-        // 3D Distance formula
-        val distance = sqrt((rDiff * rDiff + gDiff * gDiff + bDiff * bDiff).toDouble())
+        // CPU OPTIMIZATION: Removed expensive sqrt() math.
+        // A threshold distance of 30 squared is 900.
+        val squaredDistance = rDiff * rDiff + gDiff * gDiff + bDiff * bDiff
         
-        // A threshold of 30 allows for slight gradients or JPEG compression artifacts
-        return distance < 30.0
+        return squaredDistance < 900
     }
 }
