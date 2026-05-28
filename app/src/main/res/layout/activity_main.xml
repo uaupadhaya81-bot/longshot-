@@ -41,7 +41,7 @@
             android:id="@+id/tv_speed_label"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Scroll Speed: 1x (Original Default)"
+            android:text="Scroll Speed: 1x"
             android:textColor="@android:color/black"
             android:textStyle="bold"
             android:textSize="14sp" />
@@ -52,7 +52,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:layout_marginBottom="20dp"
-            android:max="3"
+            android:max="7"
             android:progress="1" />
 
         <TextView
@@ -69,8 +69,26 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
+            android:layout_marginBottom="20dp"
             android:max="80"
             android:progress="15" />
+
+        <TextView
+            android:id="@+id/tv_last_window_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Last Frame Window Size: ±15px (30px Total)"
+            android:textColor="@android:color/black"
+            android:textStyle="bold"
+            android:textSize="14sp" />
+
+        <SeekBar
+            android:id="@+id/sb_last_window"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:max="80"
+            android:progress="10" />
     </LinearLayout>
 
     <Button
