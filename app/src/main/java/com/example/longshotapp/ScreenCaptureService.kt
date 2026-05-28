@@ -438,7 +438,8 @@ class ScreenCaptureService : Service() {
                     selectorRoot = null
                     processAndStitchImages()
                     onComplete?.invoke()
-                    return@scrollExactDistance
+                    // --- CHANGED TARGET LABELS HERE TO INNERMOST SCOPE ---
+                    return@captureCurrentFrame
                 }
 
                 if (manualRequestedDuringScroll) {
@@ -452,7 +453,8 @@ class ScreenCaptureService : Service() {
                     
                     showOverlayChromeFully()
                     onComplete?.invoke() 
-                    return@scrollExactDistance
+                    // --- CHANGED TARGET LABELS HERE TO INNERMOST SCOPE ---
+                    return@captureCurrentFrame
                 }
 
                 if (!isAutoMode) {
@@ -541,7 +543,7 @@ class ScreenCaptureService : Service() {
             val cropped = Bitmap.createBitmap(bitmap, 0, 0, img.width, img.height)
             if (cropped != bitmap) {
                 bitmap.recycle()
-                   }
+            }
             return cropped
         }
     }
@@ -638,3 +640,4 @@ class ScreenCaptureService : Service() {
         selectorRoot = null
     }
 }
+
