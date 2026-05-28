@@ -10,6 +10,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
@@ -38,6 +40,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 data class CaptureFrame(val filePath: String, val scrollDistance: Int)
 
@@ -73,6 +77,7 @@ class ScreenCaptureService : Service() {
 
     private var currentSpeedIndex = 1
     private var currentWindowSize = 20
+    private var currentLastWindowSize = 15
 
     private lateinit var cacheFramesDir: File
     private var cacheFramesDeleted = false
@@ -114,6 +119,7 @@ class ScreenCaptureService : Service() {
 
         currentSpeedIndex = intent?.getIntExtra("EXTRA_SPEED_INDEX", 1) ?: 1
         currentWindowSize = intent?.getIntExtra("EXTRA_WINDOW_SIZE", 20) ?: 20
+        currentLastWindowSize = intent?.getIntExtra("EXTRA_LAST_WINDOW_SIZE", 15) ?: 15
 
         if (resultCode == Activity.RESULT_OK && dataIntent != null) {
             val mpManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -447,7 +453,22 @@ class ScreenCaptureService : Service() {
                 if (stopAfterCurrentCycle || stopRequestedDuringScroll) {
                     stopAfterCurrentCycle = false
                     stopRequestedDuringScroll = false
-                    finishSessionInternal()
+
+                    removeDuplicateTailFrameIfNeeded(currentLastWindowSize)
+
+                    stopText.text = "STOP"
+                    stopText.setTextColor(0xFFFF5252.toInt())
+
+                    buttonText.text = "STITCHING..."
+                    buttonText.visibility = View.VISIBLE
+                    autoText.visibility = View.GONE
+                    dividerAuto.visibility = View.GONE
+                    stopText.isEnabled = false
+
+                    hideOverlayChromeFully()
+                    selectorRoot?.let { safeRemoveView(it) }
+                    selectorRoot = null
+                    processAndStitchImages()
                     onComplete?.invoke()
                     return@captureCurrentFrame
                 }
@@ -498,6 +519,7 @@ class ScreenCaptureService : Service() {
             floatingView.visibility = View.VISIBLE
         }
     }
+
     private fun captureCurrentFrame(distanceScrolled: Int, onDone: () -> Unit) {
         if (isFinishingSession) {
             onDone()
@@ -609,6 +631,136 @@ class ScreenCaptureService : Service() {
         deleteCachedFramesOnce()
         capturedFrames.clear()
         stopSelf()
+    }
+
+    private fun removeDuplicateTailFrameIfNeeded(windowSize: Int) {
+        if (capturedFrames.size < 2) return
+
+        val lastFrame = capturedFrames.last()
+        val prevFrame = capturedFrames[capturedFrames.lastIndex - 1]
+
+        val lastBitmap = decodeBitmap(lastFrame.filePath) ?: return
+        val prevBitmap = decodeBitmap(prevFrame.filePath) ?: run {
+            lastBitmap.recycle()
+            return
+        }
+
+        try {
+            if (areTailFramesVerySimilar(prevBitmap, lastBitmap, windowSize)) {
+                try {
+                    File(lastFrame.filePath).delete()
+                } catch (_: Exception) {
+                }
+                capturedFrames.removeAt(capturedFrames.lastIndex)
+            }
+        } finally {
+            try {
+                if (!prevBitmap.isRecycled) prevBitmap.recycle()
+            } catch (_: Exception) {
+            }
+            try {
+                if (!lastBitmap.isRecycled) lastBitmap.recycle()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun areTailFramesVerySimilar(prev: Bitmap, last: Bitmap, windowSize: Int): Boolean {
+        if (prev.width != last.width || prev.height != last.height) return false
+
+        val dominantBg = extractDominantBackgroundColor(prev)
+
+        val sampleXs = intArrayOf(
+            prev.width / 10,
+            prev.width / 4,
+            prev.width / 2,
+            (prev.width * 3) / 4,
+            (prev.width * 9) / 10
+        )
+
+        val sampleYs = intArrayOf(
+            prev.height / 10,
+            prev.height / 3,
+            prev.height / 2,
+            (prev.height * 2) / 3,
+            (prev.height * 9) / 10
+        )
+
+        var matched = 0
+        var checked = 0
+
+        for (y in sampleYs) {
+            val yy = y.coerceIn(0, prev.height - 1)
+            for (x in sampleXs) {
+                val xx = x.coerceIn(0, prev.width - 1)
+
+                val pLast = last.getPixel(xx, yy)
+                if (isColorSimilar(pLast, dominantBg)) continue
+
+                var bestDiff = Int.MAX_VALUE
+
+                val minY = (yy - windowSize).coerceAtLeast(0)
+                val maxY = (yy + windowSize).coerceAtMost(prev.height - 1)
+
+                for (candidateY in minY..maxY) {
+                    val pPrev = prev.getPixel(xx, candidateY)
+                    val diff = colorDistance(pPrev, pLast)
+                    if (diff < bestDiff) bestDiff = diff
+                    if (bestDiff == 0) break
+                }
+
+                checked++
+                if (bestDiff <= 35) matched++
+            }
+        }
+
+        if (checked == 0) return false
+        return matched >= (checked * 0.8f)
+    }
+
+    private fun decodeBitmap(path: String): Bitmap? {
+        return try {
+            val options = BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            BitmapFactory.decodeFile(path, options)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun extractDominantBackgroundColor(bitmap: Bitmap): Int {
+        val colorCounts = HashMap<Int, Int>()
+        val step = (bitmap.height / 20).coerceAtLeast(1)
+
+        val sampleLeftX = 5.coerceAtMost(max(0, bitmap.width - 1))
+        val sampleRightX = (bitmap.width - 5).coerceIn(0, max(0, bitmap.width - 1))
+
+        for (y in 0 until bitmap.height step step) {
+            val leftColor = bitmap.getPixel(sampleLeftX, y)
+            val rightColor = bitmap.getPixel(sampleRightX, y)
+
+            colorCounts[leftColor] = colorCounts.getOrDefault(leftColor, 0) + 1
+            colorCounts[rightColor] = colorCounts.getOrDefault(rightColor, 0) + 1
+        }
+
+        return colorCounts.maxByOrNull { it.value }?.key ?: Color.WHITE
+    }
+
+    private fun isColorSimilar(c1: Int, c2: Int): Boolean {
+        val rDiff = Color.red(c1) - Color.red(c2)
+        val gDiff = Color.green(c1) - Color.green(c2)
+        val bDiff = Color.blue(c1) - Color.blue(c2)
+
+        val squaredDistance = rDiff * rDiff + gDiff * gDiff + bDiff * bDiff
+        return squaredDistance < 900
+    }
+
+    private fun colorDistance(c1: Int, c2: Int): Int {
+        val rDiff = Color.red(c1) - Color.red(c2)
+        val gDiff = Color.green(c1) - Color.green(c2)
+        val bDiff = Color.blue(c1) - Color.blue(c2)
+        return abs(rDiff) + abs(gDiff) + abs(bDiff)
     }
 
     private fun deleteCachedFramesOnce() {
