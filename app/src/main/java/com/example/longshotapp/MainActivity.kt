@@ -157,7 +157,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun shareSelected() {
         val uris = adapter.selectedFiles.filter { !it.isDirectory }.map { file ->
-            FileProvider.getUriForFile(this, "${applicationId}.fileprovider", file)
+            FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
         }
         if (uris.isEmpty()) return
         
@@ -252,7 +252,7 @@ class MainActivity : AppCompatActivity() {
                         loadCurrentFolder()
                     } else {
                         // Open in Fullscreen gallery app!
-                        val uri = FileProvider.getUriForFile(this@MainActivity, "${applicationId}.fileprovider", file)
+                        val uri = FileProvider.getUriForFile(this@MainActivity, "${packageName}.fileprovider", file)
                         val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "image/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         startActivity(intent)
                     }
@@ -271,3 +271,4 @@ class MainActivity : AppCompatActivity() {
         }
     }
 }
+
