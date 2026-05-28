@@ -68,6 +68,7 @@ class ScreenCaptureService : Service() {
     private var isAutoMode = false
     private var isScrollActive = false
     private var stopRequestedDuringScroll = false
+    private var stopAfterCurrentCycle = false
     private var manualRequestedDuringScroll = false
 
     private var currentSpeedIndex = 1
@@ -209,6 +210,7 @@ class ScreenCaptureService : Service() {
 
         fun finishSessionInternal() {
             isAutoMode = false
+            stopAfterCurrentCycle = false
             if (isFinishingSession) return
             isFinishingSession = true
 
@@ -224,14 +226,28 @@ class ScreenCaptureService : Service() {
             processAndStitchImages()
         }
 
+        fun requestStopAfterCurrentCycle() {
+            if (isFinishingSession) return
+
+            isAutoMode = false
+            stopAfterCurrentCycle = true
+            stopText.text = "WAIT..."
+            stopText.setTextColor(0xFFE57373.toInt())
+
+            if (!isScrollActive) {
+                mainHandler.post {
+                    if (stopAfterCurrentCycle && !isScrollActive && !isFinishingSession) {
+                        finishSessionInternal()
+                    }
+                }
+            }
+        }
+
         stopText.setOnClickListener {
             if (isFinishingSession) return@setOnClickListener
 
-            if (isScrollActive) {
-                stopRequestedDuringScroll = true
-                stopText.text = "WAIT..."
-                stopText.setTextColor(0xFFE57373.toInt())
-                isAutoMode = false
+            if (isAutoMode || isScrollActive) {
+                requestStopAfterCurrentCycle()
                 return@setOnClickListener
             }
             finishSessionInternal()
@@ -287,11 +303,8 @@ class ScreenCaptureService : Service() {
             }
 
             override fun onLongPress(e: MotionEvent) {
-                if (isScrollActive) {
-                    stopRequestedDuringScroll = true
-                    stopText.text = "WAIT..."
-                    stopText.setTextColor(0xFFE57373.toInt())
-                    isAutoMode = false
+                if (isAutoMode || isScrollActive) {
+                    requestStopAfterCurrentCycle()
                 } else {
                     finishSessionInternal()
                 }
@@ -398,7 +411,8 @@ class ScreenCaptureService : Service() {
             dividerAuto.visibility = View.GONE
         }
     }
-private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = null) {
+
+    private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = null) {
         val frame = selectedFrame ?: run {
             updateFloatingText(buttonText)
             onComplete?.invoke()
@@ -430,23 +444,10 @@ private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = 
                 val dividerAuto = floatingView.findViewById<View>(R.id.divider_auto)
                 val stopText = floatingView.findViewById<TextView>(R.id.stop_text)
 
-                if (stopRequestedDuringScroll) {
+                if (stopAfterCurrentCycle || stopRequestedDuringScroll) {
+                    stopAfterCurrentCycle = false
                     stopRequestedDuringScroll = false
-                    isAutoMode = false
-
-                    stopText.text = "STOP"
-                    stopText.setTextColor(0xFFFF5252.toInt())
-
-                    buttonText.text = "STITCHING..."
-                    buttonText.visibility = View.VISIBLE
-                    autoText.visibility = View.GONE
-                    dividerAuto.visibility = View.GONE
-                    stopText.isEnabled = false
-
-                    hideOverlayChromeFully()
-                    selectorRoot?.let { safeRemoveView(it) }
-                    selectorRoot = null
-                    processAndStitchImages()
+                    finishSessionInternal()
                     onComplete?.invoke()
                     return@captureCurrentFrame
                 }
@@ -478,7 +479,7 @@ private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = 
         if (!isAutoMode || isFinishingSession) return
 
         mainHandler.postDelayed({
-            if (!isAutoMode || isFinishingSession || manualRequestedDuringScroll || stopRequestedDuringScroll) return@postDelayed
+            if (!isAutoMode || isFinishingSession || manualRequestedDuringScroll || stopRequestedDuringScroll || stopAfterCurrentCycle) return@postDelayed
 
             scrollThenCapture(buttonText) {
                 triggerNextAutoScroll(buttonText, autoText)
@@ -497,7 +498,6 @@ private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = 
             floatingView.visibility = View.VISIBLE
         }
     }
-
     private fun captureCurrentFrame(distanceScrolled: Int, onDone: () -> Unit) {
         if (isFinishingSession) {
             onDone()
