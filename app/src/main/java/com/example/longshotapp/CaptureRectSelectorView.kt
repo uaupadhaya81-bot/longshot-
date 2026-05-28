@@ -9,7 +9,6 @@ import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
-import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -70,16 +69,13 @@ class CaptureRectSelectorView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        // Darken everything outside the selected rectangle.
         canvas.drawRect(0f, 0f, width.toFloat(), frame.top, scrimPaint)
         canvas.drawRect(0f, frame.top, frame.left, frame.bottom, scrimPaint)
         canvas.drawRect(frame.right, frame.top, width.toFloat(), frame.bottom, scrimPaint)
         canvas.drawRect(0f, frame.bottom, width.toFloat(), height.toFloat(), scrimPaint)
 
-        // Border
         canvas.drawRect(frame, borderPaint)
 
-        // Corner handles
         drawHandle(canvas, frame.left, frame.top)
         drawHandle(canvas, frame.right, frame.top)
         drawHandle(canvas, frame.left, frame.bottom)
@@ -249,4 +245,3 @@ class CaptureRectSelectorView @JvmOverloads constructor(
 
     private fun dp(value: Float): Float = value * resources.displayMetrics.density
 }
-
