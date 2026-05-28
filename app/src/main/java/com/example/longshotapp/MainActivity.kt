@@ -31,16 +31,16 @@ class MainActivity : AppCompatActivity() {
     private val screenCaptureLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK && result.data != null) {
-                // Read the current live values chosen by the user on the sliders
                 val speedIndex = findViewById<SeekBar>(R.id.sb_speed).progress
                 val windowSize = findViewById<SeekBar>(R.id.sb_window).progress + 5
+                val lastWindowSize = findViewById<SeekBar>(R.id.sb_last_window).progress + 5
 
                 val serviceIntent = Intent(this, ScreenCaptureService::class.java).apply {
                     putExtra("RESULT_CODE", result.resultCode)
                     putExtra("DATA_INTENT", result.data)
-                    // Pass the slider choices down to the Background Capture Engine
                     putExtra("EXTRA_SPEED_INDEX", speedIndex)
                     putExtra("EXTRA_WINDOW_SIZE", windowSize)
+                    putExtra("EXTRA_LAST_WINDOW_SIZE", lastWindowSize)
                 }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -72,30 +72,57 @@ class MainActivity : AppCompatActivity() {
 
         val tvSpeedLabel = findViewById<TextView>(R.id.tv_speed_label)
         val sbSpeed = findViewById<SeekBar>(R.id.sb_speed)
+
         val tvWindowLabel = findViewById<TextView>(R.id.tv_window_label)
         val sbWindow = findViewById<SeekBar>(R.id.sb_window)
 
-        // Monitor manual speed slider inputs to update UI text labels in real-time
+        val tvLastWindowLabel = findViewById<TextView>(R.id.tv_last_window_label)
+        val sbLastWindow = findViewById<SeekBar>(R.id.sb_last_window)
+
+        sbSpeed.max = 7
+        sbSpeed.progress = 1
+
+        sbWindow.max = 80
+        sbWindow.progress = 15
+
+        sbLastWindow.max = 80
+        sbLastWindow.progress = 10
+
         sbSpeed.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 tvSpeedLabel.text = when (progress) {
                     0 -> "Scroll Speed: 0.5x (Slowest)"
-                    1 -> "Scroll Speed: 1x (Original Default)"
-                    2 -> "Scroll Speed: 2x (Faster)"
-                    3 -> "Scroll Speed: 4x (Fastest)"
+                    1 -> "Scroll Speed: 1x"
+                    2 -> "Scroll Speed: 1.5x"
+                    3 -> "Scroll Speed: 2x"
+                    4 -> "Scroll Speed: 3x"
+                    5 -> "Scroll Speed: 4x"
+                    6 -> "Scroll Speed: 6x"
+                    7 -> "Scroll Speed: 8x (Fastest)"
                     else -> "Scroll Speed: 1x"
                 }
             }
+
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
-        // Monitor scanning window adjustments to display precise pixel thresholds
         sbWindow.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 val actualVal = progress + 5
                 tvWindowLabel.text = "Scanner Window Size: ±${actualVal}px (${actualVal * 2}px Total)"
             }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        sbLastWindow.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val actualVal = progress + 5
+                tvLastWindowLabel.text = "Last Frame Window Size: ±${actualVal}px (${actualVal * 2}px Total)"
+            }
+
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
@@ -108,8 +135,8 @@ class MainActivity : AppCompatActivity() {
     private fun checkAndStartService() {
         when {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                    checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-                    android.content.pm.PackageManager.PERMISSION_GRANTED -> {
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED -> {
                 notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             }
 
