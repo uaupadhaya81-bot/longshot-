@@ -619,7 +619,7 @@ class ScreenCaptureService : Service() {
             return
         }
 
-        val stitchedBitmap = ImageStitcher.stitchExact(capturedFrames, currentWindowSize)
+        val stitchedBitmap = ImageStitcher.stitchExact(capturedFrames, currentWindowSize, currentLastWindowSize)
 
         if (stitchedBitmap != null) {
             saveBitmapToStorage(stitchedBitmap)
