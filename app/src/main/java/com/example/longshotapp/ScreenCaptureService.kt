@@ -39,7 +39,7 @@ import java.io.FileOutputStream
 import java.io.OutputStream
 import kotlin.math.abs
 
-data class CaptureFrame(val bitmap: Bitmap, val scrollDistance: Int)
+data class CaptureFrame(val filePath: String, val scrollDistance: Int)
 
 class ScreenCaptureService : Service() {
 
@@ -73,6 +73,8 @@ class ScreenCaptureService : Service() {
     private var currentSpeedIndex = 1
     private var currentWindowSize = 20
 
+    private lateinit var cacheFramesDir: File
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -81,6 +83,9 @@ class ScreenCaptureService : Service() {
         super.onCreate()
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        cacheFramesDir = File(cacheDir, "longshot_frames").apply {
+            if (!exists()) mkdirs()
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val bounds = windowManager.currentWindowMetrics.bounds
@@ -249,7 +254,6 @@ class ScreenCaptureService : Service() {
                 autoText.setTextColor(0xFFFF9800.toInt())
                 buttonText.visibility = View.GONE
                 dividerAuto.visibility = View.GONE
-
                 triggerNextAutoScroll(buttonText, autoText)
             } else {
                 autoText.text = "AUTO"
@@ -515,7 +519,16 @@ private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = 
                     fullBitmap.recycle()
                 }
 
-                capturedFrames.add(CaptureFrame(finalBitmap, distanceScrolled))
+                val savedPath = saveBitmapToCacheFile(finalBitmap)
+                if (!finalBitmap.isRecycled) {
+                    finalBitmap.recycle()
+                }
+
+                if (savedPath != null) {
+                    capturedFrames.add(CaptureFrame(savedPath, distanceScrolled))
+                } else {
+                    Toast.makeText(this, "Failed to cache frame", Toast.LENGTH_SHORT).show()
+                }
             } catch (e: Exception) {
                 Toast.makeText(this, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
             } finally {
@@ -525,6 +538,20 @@ private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = 
                 onDone()
             }
         }, 500)
+    }
+
+    private fun saveBitmapToCacheFile(bitmap: Bitmap): String? {
+        return try {
+            if (!cacheFramesDir.exists()) cacheFramesDir.mkdirs()
+
+            val file = File(cacheFramesDir, "frame_${System.currentTimeMillis()}_${capturedFrames.size}.png")
+            FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+            file.absolutePath
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun readScreenBitmap(): Bitmap? {
@@ -577,12 +604,18 @@ private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = 
             Toast.makeText(this, "Stitching failed!", Toast.LENGTH_SHORT).show()
         }
 
-        capturedFrames.forEach { frame ->
-            if (!frame.bitmap.isRecycled) frame.bitmap.recycle()
-        }
+        deleteCachedFrames()
         capturedFrames.clear()
-
         stopSelf()
+    }
+
+    private fun deleteCachedFrames() {
+        capturedFrames.forEach { frame ->
+            try {
+                File(frame.filePath).delete()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     private fun saveBitmapToStorage(bitmap: Bitmap) {
@@ -635,6 +668,8 @@ private fun scrollThenCapture(buttonText: TextView, onComplete: (() -> Unit)? = 
         isAutoMode = false
         cleanUpEngine()
         mediaProjection?.stop()
+
+        deleteCachedFrames()
 
         if (::floatingView.isInitialized) {
             safeRemoveView(floatingView)
