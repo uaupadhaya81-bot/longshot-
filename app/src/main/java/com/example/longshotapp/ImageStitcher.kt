@@ -24,7 +24,6 @@ object ImageStitcher {
 
         var currentYOffset = 0
         
-        // We need the full dimensions of the first image to start
         val firstOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(frames[0].filePath, firstOptions)
         val width = firstOptions.outWidth
@@ -33,7 +32,7 @@ object ImageStitcher {
 
         try {
             // ==========================================
-            // PASS 1: SLICE LOADING (REGION DECODING)
+            // PASS 1: SLICE LOADING & FIXED DUPLICATE CHECK
             // ==========================================
             for (i in 1 until frames.size) {
                 val prevPath = validFrames.last().filePath
@@ -43,17 +42,38 @@ object ImageStitcher {
                 val expectedScroll = frames[i].scrollDistance
                 val expectedOverlap = prevHeight - expectedScroll
 
-                // If it's the last frame, we might need a huge slice. Otherwise, just the window.
                 val sliceHeightNeeded = if (isLastFrame) prevHeight else (expectedOverlap + windowSize + 10)
 
-                // 1. Decode ONLY the bottom slice of the previous image
                 val decoderPrev = BitmapRegionDecoder.newInstance(prevPath, false) ?: continue
+                val decoderCurr = BitmapRegionDecoder.newInstance(currPath, false) ?: continue
+
+                // -----------------------------------------------------------------
+                // CRITICAL BUG FIX: COMPARE THE EXACT SAME REGION FOR DUPLICATES
+                // -----------------------------------------------------------------
+                // We load the top section of BOTH images. If the screen didn't move,
+                // the top sections will match 100%.
+                val testRect = Rect(0, 0, width, min(decoderPrev.height, min(decoderCurr.height, sliceHeightNeeded)))
+                val testSlicePrev = decoderPrev.decodeRegion(testRect, getHardwareOptions())
+                val testSliceCurr = decoderCurr.decodeRegion(testRect, getHardwareOptions())
+
+                if (testSlicePrev != null && testSliceCurr != null) {
+                    if (areBitmapsIdenticalFast(testSlicePrev, testSliceCurr)) {
+                        testSlicePrev.recycle()
+                        testSliceCurr.recycle()
+                        decoderPrev.recycle()
+                        decoderCurr.recycle()
+                        break // Exact duplicate detected! Stop stitching immediately.
+                    }
+                }
+                testSlicePrev?.recycle()
+                testSliceCurr?.recycle()
+                // -----------------------------------------------------------------
+
+                // If they are not duplicates, proceed with staggered alignment math
                 val rectPrev = Rect(0, max(0, decoderPrev.height - sliceHeightNeeded), width, decoderPrev.height)
                 val slicePrev = decoderPrev.decodeRegion(rectPrev, getHardwareOptions())
                 decoderPrev.recycle()
 
-                // 2. Decode ONLY the top slice of the current image
-                val decoderCurr = BitmapRegionDecoder.newInstance(currPath, false) ?: continue
                 val rectCurr = Rect(0, 0, width, min(decoderCurr.height, sliceHeightNeeded))
                 val sliceCurr = decoderCurr.decodeRegion(rectCurr, getHardwareOptions())
                 val currFullHeight = decoderCurr.height
@@ -61,16 +81,8 @@ object ImageStitcher {
 
                 if (slicePrev == null || sliceCurr == null) break
 
-                // Dead-End Pruning using the slices
-                if (areBitmapsIdenticalFast(slicePrev, sliceCurr)) {
-                    slicePrev.recycle()
-                    sliceCurr.recycle()
-                    break 
-                }
-
                 validFrames.add(frames[i])
 
-                // Do the heavy math on the TINY slices instead of full images
                 val adjustedScrollFromSlice = findMicroAlignment(
                     prevBitmap = slicePrev,
                     currentBitmap = sliceCurr,
@@ -79,7 +91,6 @@ object ImageStitcher {
                     isLastFrame = isLastFrame
                 )
 
-                // The result is based on the slice, convert it back to the absolute scroll distance
                 val absoluteScroll = currFullHeight - adjustedScrollFromSlice
 
                 currentYOffset += absoluteScroll.coerceAtLeast(1)
@@ -88,12 +99,11 @@ object ImageStitcher {
                 totalHeight = currentYOffset + currFullHeight
                 prevHeight = currFullHeight
 
-                // Clean up the tiny slices instantly
                 slicePrev.recycle()
                 sliceCurr.recycle()
             }
         } catch (e: Exception) {
-            // Failsafe catch
+            // Failsafe catch block
         }
 
         if (width <= 0 || totalHeight <= 0) return null
