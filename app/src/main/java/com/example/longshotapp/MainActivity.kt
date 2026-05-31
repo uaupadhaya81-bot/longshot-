@@ -157,7 +157,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun shareSelected() {
         val uris = adapter.selectedFiles.filter { !it.isDirectory }.map { file ->
-            FileProvider.getUriForFile(this, "${applicationId}.fileprovider", file)
+            FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
         }
         if (uris.isEmpty()) return
         
@@ -201,12 +201,15 @@ class MainActivity : AppCompatActivity() {
         var isSelectionMode = false
 
         fun submitList(newItems: List<File>) {
-            items = newItems; notifyDataSetChanged()
+            items = newItems
+            notifyDataSetChanged()
         }
         
         fun clearSelection() {
-            selectedFiles.clear(); isSelectionMode = false
-            onSelectionChange(0); notifyDataSetChanged()
+            selectedFiles.clear()
+            isSelectionMode = false
+            onSelectionChange(0)
+            notifyDataSetChanged()
         }
 
         inner class VH(v: View) : RecyclerView.ViewHolder(v) {
@@ -252,7 +255,7 @@ class MainActivity : AppCompatActivity() {
                         loadCurrentFolder()
                     } else {
                         // Open in Fullscreen gallery app!
-                        val uri = FileProvider.getUriForFile(this@MainActivity, "${applicationId}.fileprovider", file)
+                        val uri = FileProvider.getUriForFile(this@MainActivity, "${packageName}.fileprovider", file)
                         val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "image/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         startActivity(intent)
                     }
