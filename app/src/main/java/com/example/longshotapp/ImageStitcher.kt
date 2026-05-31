@@ -18,22 +18,20 @@ object ImageStitcher {
 
         val validFrames = mutableListOf<CaptureFrame>()
         val offsets = mutableListOf<Int>()
-        
+
         validFrames.add(frames[0])
         offsets.add(0)
 
         var currentYOffset = 0
-        
+
         val firstOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(frames[0].filePath, firstOptions)
+
         val width = firstOptions.outWidth
         var totalHeight = firstOptions.outHeight
         var prevHeight = firstOptions.outHeight
 
         try {
-            // ==========================================
-            // PASS 1: SLICE LOADING & FIXED DUPLICATE CHECK
-            // ==========================================
             for (i in 1 until frames.size) {
                 val prevPath = validFrames.last().filePath
                 val currPath = frames[i].filePath
@@ -41,18 +39,20 @@ object ImageStitcher {
                 val isLastFrame = (i == frames.size - 1)
                 val expectedScroll = frames[i].scrollDistance
                 val expectedOverlap = prevHeight - expectedScroll
+                val scanWindow = windowSize.coerceAtLeast(1)
 
-                val sliceHeightNeeded = if (isLastFrame) prevHeight else (expectedOverlap + windowSize + 10)
+                val sliceHeightNeeded = if (isLastFrame) prevHeight else (expectedOverlap + scanWindow + 10)
 
                 val decoderPrev = BitmapRegionDecoder.newInstance(prevPath, false) ?: continue
                 val decoderCurr = BitmapRegionDecoder.newInstance(currPath, false) ?: continue
 
-                // -----------------------------------------------------------------
-                // CRITICAL BUG FIX: COMPARE THE EXACT SAME REGION FOR DUPLICATES
-                // -----------------------------------------------------------------
-                // We load the top section of BOTH images. If the screen didn't move,
-                // the top sections will match 100%.
-                val testRect = Rect(0, 0, width, min(decoderPrev.height, min(decoderCurr.height, sliceHeightNeeded)))
+                // Compare the same top region first. If both are identical, stop early.
+                val testRect = Rect(
+                    0,
+                    0,
+                    width,
+                    min(decoderPrev.height, min(decoderCurr.height, sliceHeightNeeded))
+                )
                 val testSlicePrev = decoderPrev.decodeRegion(testRect, getHardwareOptions())
                 val testSliceCurr = decoderCurr.decodeRegion(testRect, getHardwareOptions())
 
@@ -62,14 +62,13 @@ object ImageStitcher {
                         testSliceCurr.recycle()
                         decoderPrev.recycle()
                         decoderCurr.recycle()
-                        break // Exact duplicate detected! Stop stitching immediately.
+                        break
                     }
                 }
+
                 testSlicePrev?.recycle()
                 testSliceCurr?.recycle()
-                // -----------------------------------------------------------------
 
-                // If they are not duplicates, proceed with staggered alignment math
                 val rectPrev = Rect(0, max(0, decoderPrev.height - sliceHeightNeeded), width, decoderPrev.height)
                 val slicePrev = decoderPrev.decodeRegion(rectPrev, getHardwareOptions())
                 decoderPrev.recycle()
@@ -87,40 +86,35 @@ object ImageStitcher {
                     prevBitmap = slicePrev,
                     currentBitmap = sliceCurr,
                     expectedOverlap = expectedOverlap,
-                    windowSize = windowSize,
+                    windowSize = scanWindow,
                     isLastFrame = isLastFrame
                 )
 
                 val absoluteScroll = currFullHeight - adjustedScrollFromSlice
-
                 currentYOffset += absoluteScroll.coerceAtLeast(1)
                 offsets.add(currentYOffset)
-                
+
                 totalHeight = currentYOffset + currFullHeight
                 prevHeight = currFullHeight
 
                 slicePrev.recycle()
                 sliceCurr.recycle()
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // Failsafe catch block
         }
 
         if (width <= 0 || totalHeight <= 0) return null
-
         if (totalHeight > 16384) totalHeight = 16384
 
-        // ==========================================
-        // PASS 2: STREAM AND DRAW TO CANVAS
-        // ==========================================
         return try {
             val resultBitmap = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.RGB_565)
             val canvas = Canvas(resultBitmap)
             val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
 
             for (i in validFrames.indices) {
-                if (offsets[i] >= 16384) break 
-                
+                if (offsets[i] >= 16384) break
+
                 val options = getHardwareOptions()
                 val bitmap = BitmapFactory.decodeFile(validFrames[i].filePath, options)
                 if (bitmap != null) {
@@ -130,7 +124,7 @@ object ImageStitcher {
             }
 
             resultBitmap
-        } catch (e: OutOfMemoryError) {
+        } catch (_: OutOfMemoryError) {
             null
         }
     }
@@ -143,6 +137,7 @@ object ImageStitcher {
 
     private fun areBitmapsIdenticalFast(b1: Bitmap, b2: Bitmap): Boolean {
         if (b1.width != b2.width || b1.height != b2.height) return false
+
         val random = java.util.Random(42)
         val w = b1.width
         val h = b1.height
@@ -163,8 +158,7 @@ object ImageStitcher {
         isLastFrame: Boolean
     ): Int {
         val width = prevBitmap.width
-
-        if (expectedOverlap < 50 && !isLastFrame) return expectedOverlap
+        val scanWindow = windowSize.coerceAtLeast(1)
 
         val searchMin: Int
         val searchMax: Int
@@ -173,27 +167,29 @@ object ImageStitcher {
             searchMin = 1
             searchMax = (prevBitmap.height - 1).coerceAtMost(currentBitmap.height - 1)
         } else {
-            searchMin = (expectedOverlap - windowSize).coerceAtLeast(1)
-            searchMax = (expectedOverlap + windowSize)
+            searchMin = (expectedOverlap - scanWindow).coerceAtLeast(1)
+            searchMax = (expectedOverlap + scanWindow)
                 .coerceAtMost(prevBitmap.height - 1)
                 .coerceAtMost(currentBitmap.height - 1)
         }
 
-        val sampleXs = IntArray(10) { i ->
-            val rawX = width * (i + 1) / 11
+        if (searchMin > searchMax) return expectedOverlap.coerceAtLeast(1)
+
+        val sampleXs = IntArray(16) { i ->
+            val rawX = width * (i + 1) / 17
             rawX.coerceIn(0, max(0, width - 1))
         }
 
         val dominantBgColor = extractDominantBackgroundColor(prevBitmap)
 
-        var bestOverlap = expectedOverlap
+        var bestOverlap = expectedOverlap.coerceAtLeast(1)
         var lowestDiff = Double.MAX_VALUE
 
         for (testOverlap in searchMin..searchMax) {
             var diff = 0.0
             var activePixels = 0
 
-            for (rowOffset in 0 until 10) {
+            for (rowOffset in 0 until 16) {
                 val rowPrev = prevBitmap.height - testOverlap + rowOffset
                 val rowCurr = rowOffset
 
@@ -216,7 +212,9 @@ object ImageStitcher {
                 }
             }
 
-            val finalScore = if (activePixels > 0) diff / activePixels else Double.MAX_VALUE
+            if (activePixels == 0) continue
+
+            val finalScore = diff / activePixels
             if (finalScore < lowestDiff) {
                 lowestDiff = finalScore
                 bestOverlap = testOverlap
@@ -228,17 +226,30 @@ object ImageStitcher {
 
     private fun extractDominantBackgroundColor(bitmap: Bitmap): Int {
         val colorCounts = HashMap<Int, Int>()
-        val step = (bitmap.height / 20).coerceAtLeast(1)
 
-        val sampleLeftX = 5.coerceAtMost(max(0, bitmap.width - 1))
-        val sampleRightX = (bitmap.width - 5).coerceIn(0, max(0, bitmap.width - 1))
+        val bandW = (bitmap.width / 12).coerceAtLeast(1)
+        val bandH = (bitmap.height / 12).coerceAtLeast(1)
+        val stepX = (bitmap.width / 24).coerceAtLeast(1)
+        val stepY = (bitmap.height / 24).coerceAtLeast(1)
 
-        for (y in 0 until bitmap.height step step) {
-            val leftColor = bitmap.getPixel(sampleLeftX, y)
-            val rightColor = bitmap.getPixel(sampleRightX, y)
+        fun addColor(c: Int) {
+            colorCounts[c] = colorCounts.getOrDefault(c, 0) + 1
+        }
 
-            colorCounts[leftColor] = colorCounts.getOrDefault(leftColor, 0) + 1
-            colorCounts[rightColor] = colorCounts.getOrDefault(rightColor, 0) + 1
+        for (y in 0 until min(bandH, bitmap.height) step stepY) {
+            for (x in 0 until bitmap.width step stepX) addColor(bitmap.getPixel(x, y))
+        }
+
+        for (y in max(0, bitmap.height - bandH) until bitmap.height step stepY) {
+            for (x in 0 until bitmap.width step stepX) addColor(bitmap.getPixel(x, y))
+        }
+
+        for (x in 0 until min(bandW, bitmap.width) step stepX) {
+            for (y in 0 until bitmap.height step stepY) addColor(bitmap.getPixel(x, y))
+        }
+
+        for (x in max(0, bitmap.width - bandW) until bitmap.width step stepX) {
+            for (y in 0 until bitmap.height step stepY) addColor(bitmap.getPixel(x, y))
         }
 
         return colorCounts.maxByOrNull { it.value }?.key ?: Color.WHITE
@@ -248,7 +259,6 @@ object ImageStitcher {
         val rDiff = Color.red(c1) - Color.red(c2)
         val gDiff = Color.green(c1) - Color.green(c2)
         val bDiff = Color.blue(c1) - Color.blue(c2)
-
         return (rDiff * rDiff + gDiff * gDiff + bDiff * bDiff) < 900
     }
 }
