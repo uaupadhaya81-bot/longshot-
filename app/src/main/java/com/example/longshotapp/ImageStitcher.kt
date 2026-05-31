@@ -2,9 +2,11 @@ package com.example.longshotapp
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.BitmapRegionDecoder
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -22,89 +24,115 @@ object ImageStitcher {
 
         var currentYOffset = 0
         
-        // Load the very first frame to start the stream
-        var prevBitmap = loadBitmap(frames[0].filePath) ?: return null
-        var totalHeight = prevBitmap.height
-        val width = prevBitmap.width
+        // We need the full dimensions of the first image to start
+        val firstOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(frames[0].filePath, firstOptions)
+        val width = firstOptions.outWidth
+        var totalHeight = firstOptions.outHeight
+        var prevHeight = firstOptions.outHeight
 
         try {
             // ==========================================
-            // PASS 1: STREAM AND CALCULATE MATH ONLY
+            // PASS 1: SLICE LOADING (REGION DECODING)
             // ==========================================
             for (i in 1 until frames.size) {
-                val currentBitmap = loadBitmap(frames[i].filePath) ?: break
+                val prevPath = validFrames.last().filePath
+                val currPath = frames[i].filePath
 
-                // Dead-End Pruning: If identical, we hit the bottom of the scroll.
-                if (areBitmapsIdenticalFast(prevBitmap, currentBitmap)) {
-                    currentBitmap.recycle() // Throw it away instantly
-                    break // Stop calculating, we are done scrolling
+                val isLastFrame = (i == frames.size - 1)
+                val expectedScroll = frames[i].scrollDistance
+                val expectedOverlap = prevHeight - expectedScroll
+
+                // If it's the last frame, we might need a huge slice. Otherwise, just the window.
+                val sliceHeightNeeded = if (isLastFrame) prevHeight else (expectedOverlap + windowSize + 10)
+
+                // 1. Decode ONLY the bottom slice of the previous image
+                val decoderPrev = BitmapRegionDecoder.newInstance(prevPath, false) ?: continue
+                val rectPrev = Rect(0, max(0, decoderPrev.height - sliceHeightNeeded), width, decoderPrev.height)
+                val slicePrev = decoderPrev.decodeRegion(rectPrev, getHardwareOptions())
+                decoderPrev.recycle()
+
+                // 2. Decode ONLY the top slice of the current image
+                val decoderCurr = BitmapRegionDecoder.newInstance(currPath, false) ?: continue
+                val rectCurr = Rect(0, 0, width, min(decoderCurr.height, sliceHeightNeeded))
+                val sliceCurr = decoderCurr.decodeRegion(rectCurr, getHardwareOptions())
+                val currFullHeight = decoderCurr.height
+                decoderCurr.recycle()
+
+                if (slicePrev == null || sliceCurr == null) break
+
+                // Dead-End Pruning using the slices
+                if (areBitmapsIdenticalFast(slicePrev, sliceCurr)) {
+                    slicePrev.recycle()
+                    sliceCurr.recycle()
+                    break 
                 }
 
                 validFrames.add(frames[i])
-                val expectedScroll = frames[i].scrollDistance
-                val isLastFrame = (i == frames.size - 1)
 
-                val adjustedScroll = findMicroAlignment(
-                    prevBitmap = prevBitmap,
-                    currentBitmap = currentBitmap,
-                    expectedScroll = expectedScroll,
+                // Do the heavy math on the TINY slices instead of full images
+                val adjustedScrollFromSlice = findMicroAlignment(
+                    prevBitmap = slicePrev,
+                    currentBitmap = sliceCurr,
+                    expectedOverlap = expectedOverlap,
                     windowSize = windowSize,
                     isLastFrame = isLastFrame
-                ).coerceAtLeast(1)
+                )
 
-                currentYOffset += adjustedScroll
+                // The result is based on the slice, convert it back to the absolute scroll distance
+                val absoluteScroll = currFullHeight - adjustedScrollFromSlice
+
+                currentYOffset += absoluteScroll.coerceAtLeast(1)
                 offsets.add(currentYOffset)
-                totalHeight = currentYOffset + currentBitmap.height
+                
+                totalHeight = currentYOffset + currFullHeight
+                prevHeight = currFullHeight
 
-                // CRITICAL MEMORY FIX: Recycle the previous frame, move current to previous
-                prevBitmap.recycle()
-                prevBitmap = currentBitmap
+                // Clean up the tiny slices instantly
+                slicePrev.recycle()
+                sliceCurr.recycle()
             }
-        } finally {
-            // Ensure the last holding bitmap is freed
-            if (!prevBitmap.isRecycled) {
-                prevBitmap.recycle()
-            }
+        } catch (e: Exception) {
+            // Failsafe catch
         }
 
         if (width <= 0 || totalHeight <= 0) return null
 
-        // Hardware Failsafe: Max Android Canvas height is typically 16384px.
-        if (totalHeight > 16384) {
-            totalHeight = 16384
-        }
+        if (totalHeight > 16384) totalHeight = 16384
 
         // ==========================================
         // PASS 2: STREAM AND DRAW TO CANVAS
         // ==========================================
         return try {
-            // CRITICAL MEMORY FIX: RGB_565 uses 50% less RAM than ARGB_8888
             val resultBitmap = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.RGB_565)
             val canvas = Canvas(resultBitmap)
             val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
 
             for (i in validFrames.indices) {
-                // If we hit our safety limit, stop drawing
                 if (offsets[i] >= 16384) break 
                 
-                val bitmap = loadBitmap(validFrames[i].filePath)
+                val options = getHardwareOptions()
+                val bitmap = BitmapFactory.decodeFile(validFrames[i].filePath, options)
                 if (bitmap != null) {
                     canvas.drawBitmap(bitmap, 0f, offsets[i].toFloat(), paint)
-                    // CRITICAL MEMORY FIX: Recycle instantly after drawing
                     bitmap.recycle()
                 }
             }
 
             resultBitmap
         } catch (e: OutOfMemoryError) {
-            // If the final stitched bitmap STILL crashes it (device has very low RAM)
             null
+        }
+    }
+
+    private fun getHardwareOptions(): BitmapFactory.Options {
+        return BitmapFactory.Options().apply {
+            inPreferredConfig = Bitmap.Config.RGB_565
         }
     }
 
     private fun areBitmapsIdenticalFast(b1: Bitmap, b2: Bitmap): Boolean {
         if (b1.width != b2.width || b1.height != b2.height) return false
-
         val random = java.util.Random(42)
         val w = b1.width
         val h = b1.height
@@ -112,36 +140,21 @@ object ImageStitcher {
         for (i in 0 until 1000) {
             val x = random.nextInt(w)
             val y = random.nextInt(h)
-            if (b1.getPixel(x, y) != b2.getPixel(x, y)) {
-                return false
-            }
+            if (b1.getPixel(x, y) != b2.getPixel(x, y)) return false
         }
         return true
-    }
-
-    private fun loadBitmap(path: String): Bitmap? {
-        return try {
-            val options = BitmapFactory.Options().apply {
-                // CRITICAL MEMORY FIX: Force RGB_565 (2 bytes per pixel instead of 4)
-                inPreferredConfig = Bitmap.Config.RGB_565
-            }
-            BitmapFactory.decodeFile(path, options)
-        } catch (_: Exception) {
-            null
-        }
     }
 
     private fun findMicroAlignment(
         prevBitmap: Bitmap,
         currentBitmap: Bitmap,
-        expectedScroll: Int,
+        expectedOverlap: Int,
         windowSize: Int,
         isLastFrame: Boolean
     ): Int {
         val width = prevBitmap.width
-        val expectedOverlap = prevBitmap.height - expectedScroll
 
-        if (expectedOverlap < 50 && !isLastFrame) return expectedScroll
+        if (expectedOverlap < 50 && !isLastFrame) return expectedOverlap
 
         val searchMin: Int
         val searchMax: Int
@@ -200,7 +213,7 @@ object ImageStitcher {
             }
         }
 
-        return prevBitmap.height - bestOverlap
+        return bestOverlap
     }
 
     private fun extractDominantBackgroundColor(bitmap: Bitmap): Int {
@@ -226,7 +239,6 @@ object ImageStitcher {
         val gDiff = Color.green(c1) - Color.green(c2)
         val bDiff = Color.blue(c1) - Color.blue(c2)
 
-        val squaredDistance = rDiff * rDiff + gDiff * gDiff + bDiff * bDiff
-        return squaredDistance < 900
+        return (rDiff * rDiff + gDiff * gDiff + bDiff * bDiff) < 900
     }
 }
