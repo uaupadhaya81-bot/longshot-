@@ -11,47 +11,38 @@ import kotlin.math.min
 
 object ImageStitcher {
 
-    private data class LoadedFrame(
-        val frame: CaptureFrame,
-        val bitmap: Bitmap
-    )
-
     fun stitchExact(frames: List<CaptureFrame>, windowSize: Int): Bitmap? {
         if (frames.isEmpty()) return null
 
-        val loadedFrames = ArrayList<LoadedFrame>(frames.size)
+        val validFrames = mutableListOf<CaptureFrame>()
+        val offsets = mutableListOf<Int>()
+        
+        validFrames.add(frames[0])
+        offsets.add(0)
+
+        var currentYOffset = 0
+        
+        // Load the very first frame to start the stream
+        var prevBitmap = loadBitmap(frames[0].filePath) ?: return null
+        var totalHeight = prevBitmap.height
+        val width = prevBitmap.width
 
         try {
-            // 1. Load all frames into memory
-            for (frame in frames) {
-                val bitmap = loadBitmap(frame.filePath) ?: return null
-                loadedFrames.add(LoadedFrame(frame, bitmap))
-            }
+            // ==========================================
+            // PASS 1: STREAM AND CALCULATE MATH ONLY
+            // ==========================================
+            for (i in 1 until frames.size) {
+                val currentBitmap = loadBitmap(frames[i].filePath) ?: break
 
-            // 2. Prune identical dead frames from the end (Failsafe for reaching the bottom)
-            pruneDeadEndFrames(loadedFrames)
+                // Dead-End Pruning: If identical, we hit the bottom of the scroll.
+                if (areBitmapsIdenticalFast(prevBitmap, currentBitmap)) {
+                    currentBitmap.recycle() // Throw it away instantly
+                    break // Stop calculating, we are done scrolling
+                }
 
-            // If pruning removed everything except one frame, just return it
-            if (loadedFrames.size == 1) {
-                return loadedFrames.first().bitmap
-            }
-
-            // 3. Calculate Stitching Offsets
-            val width = loadedFrames.first().bitmap.width
-            val offsets = IntArray(loadedFrames.size)
-            offsets[0] = 0
-
-            var currentYOffset = 0
-            var totalHeight = loadedFrames.first().bitmap.height
-
-            for (i in 1 until loadedFrames.size) {
-                val prevBitmap = loadedFrames[i - 1].bitmap
-                val currentBitmap = loadedFrames[i].bitmap
-
-                val expectedScroll = loadedFrames[i].frame.scrollDistance
-                
-                // NEW: Check if this is the very last frame in the sequence
-                val isLastFrame = (i == loadedFrames.size - 1)
+                validFrames.add(frames[i])
+                val expectedScroll = frames[i].scrollDistance
+                val isLastFrame = (i == frames.size - 1)
 
                 val adjustedScroll = findMicroAlignment(
                     prevBitmap = prevBitmap,
@@ -62,61 +53,58 @@ object ImageStitcher {
                 ).coerceAtLeast(1)
 
                 currentYOffset += adjustedScroll
-                offsets[i] = currentYOffset
+                offsets.add(currentYOffset)
                 totalHeight = currentYOffset + currentBitmap.height
+
+                // CRITICAL MEMORY FIX: Recycle the previous frame, move current to previous
+                prevBitmap.recycle()
+                prevBitmap = currentBitmap
             }
+        } finally {
+            // Ensure the last holding bitmap is freed
+            if (!prevBitmap.isRecycled) {
+                prevBitmap.recycle()
+            }
+        }
 
-            if (width <= 0 || totalHeight <= 0) return null
+        if (width <= 0 || totalHeight <= 0) return null
 
-            // 4. Draw the final image
-            val resultBitmap = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
+        // Hardware Failsafe: Max Android Canvas height is typically 16384px.
+        if (totalHeight > 16384) {
+            totalHeight = 16384
+        }
+
+        // ==========================================
+        // PASS 2: STREAM AND DRAW TO CANVAS
+        // ==========================================
+        return try {
+            // CRITICAL MEMORY FIX: RGB_565 uses 50% less RAM than ARGB_8888
+            val resultBitmap = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.RGB_565)
             val canvas = Canvas(resultBitmap)
             val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
 
-            for (i in loadedFrames.indices) {
-                val bitmap = loadedFrames[i].bitmap
-                canvas.drawBitmap(bitmap, 0f, offsets[i].toFloat(), paint)
+            for (i in validFrames.indices) {
+                // If we hit our safety limit, stop drawing
+                if (offsets[i] >= 16384) break 
+                
+                val bitmap = loadBitmap(validFrames[i].filePath)
+                if (bitmap != null) {
+                    canvas.drawBitmap(bitmap, 0f, offsets[i].toFloat(), paint)
+                    // CRITICAL MEMORY FIX: Recycle instantly after drawing
+                    bitmap.recycle()
+                }
             }
 
-            return resultBitmap
-        } catch (_: Exception) {
-            return null
-        } finally {
-            recycleAll(loadedFrames)
+            resultBitmap
+        } catch (e: OutOfMemoryError) {
+            // If the final stitched bitmap STILL crashes it (device has very low RAM)
+            null
         }
     }
 
-    /**
-     * Cascades backwards from the end of the list.
-     * If the last two frames are identical, it discards the last one and repeats.
-     */
-    private fun pruneDeadEndFrames(loadedFrames: ArrayList<LoadedFrame>) {
-        while (loadedFrames.size >= 2) {
-            val lastFrame = loadedFrames[loadedFrames.size - 1]
-            val secondLastFrame = loadedFrames[loadedFrames.size - 2]
-
-            if (areBitmapsIdenticalFast(secondLastFrame.bitmap, lastFrame.bitmap)) {
-                // The images are identical (scroll hit the bottom). 
-                // Recycle the duplicate bitmap to free RAM, then remove it from the list.
-                lastFrame.bitmap.recycle()
-                loadedFrames.removeAt(loadedFrames.size - 1)
-            } else {
-                // We found two distinct images! The cascading check is complete.
-                break
-            }
-        }
-    }
-
-    /**
-     * Samples 1000 fixed-random pixels. Extremely fast because it exits 
-     * on the very first mismatched pixel it finds.
-     */
     private fun areBitmapsIdenticalFast(b1: Bitmap, b2: Bitmap): Boolean {
-        // If dimensions don't match, they obviously aren't identical
         if (b1.width != b2.width || b1.height != b2.height) return false
 
-        // Use a fixed seed (e.g., 42). This ensures that every time this function runs,
-        // it checks the exact same 1000 coordinate spread, guaranteeing consistency.
         val random = java.util.Random(42)
         val w = b1.width
         val h = b1.height
@@ -124,37 +112,22 @@ object ImageStitcher {
         for (i in 0 until 1000) {
             val x = random.nextInt(w)
             val y = random.nextInt(h)
-
-            // The absolute fastest way to check: exit immediately upon first failure
             if (b1.getPixel(x, y) != b2.getPixel(x, y)) {
                 return false
             }
         }
-
-        // If it survives 1000 randomized coordinate checks without a single mismatch, 
-        // the images are identical.
         return true
     }
 
     private fun loadBitmap(path: String): Bitmap? {
         return try {
             val options = BitmapFactory.Options().apply {
-                inPreferredConfig = Bitmap.Config.ARGB_8888
+                // CRITICAL MEMORY FIX: Force RGB_565 (2 bytes per pixel instead of 4)
+                inPreferredConfig = Bitmap.Config.RGB_565
             }
             BitmapFactory.decodeFile(path, options)
         } catch (_: Exception) {
             null
-        }
-    }
-
-    private fun recycleAll(frames: List<LoadedFrame>) {
-        for (loaded in frames) {
-            try {
-                if (!loaded.bitmap.isRecycled) {
-                    loaded.bitmap.recycle()
-                }
-            } catch (_: Exception) {
-            }
         }
     }
 
@@ -170,17 +143,13 @@ object ImageStitcher {
 
         if (expectedOverlap < 50 && !isLastFrame) return expectedScroll
 
-        // --- NEW LOGIC: Dynamic Search Bounds ---
         val searchMin: Int
         val searchMax: Int
 
         if (isLastFrame) {
-            // It's the last frame! It might be a partial scroll.
-            // Ignore the windowSize and search the ENTIRE overlapping height.
             searchMin = 1
             searchMax = (prevBitmap.height - 1).coerceAtMost(currentBitmap.height - 1)
         } else {
-            // Normal frame. It scrolled fully, so keep it fast and search only the tiny window.
             searchMin = (expectedOverlap - windowSize).coerceAtLeast(1)
             searchMax = (expectedOverlap + windowSize)
                 .coerceAtMost(prevBitmap.height - 1)
