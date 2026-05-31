@@ -2,85 +2,75 @@
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="24dp"
-    android:background="@android:color/white">
-
-    <TextView
-        android:id="@+id/title_text"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_centerHorizontal="true"
-        android:layout_marginTop="30dp"
-        android:text="Offline Longshot Capture"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        android:textColor="@android:color/black" />
-
-    <TextView
-        android:id="@+id/instruction_text"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_below="@id/title_text"
-        android:layout_marginTop="12dp"
-        android:text="1. Enable Accessibility Service\n2. Allow overlay permission\n3. Set preferences and tap Start"
-        android:textSize="14sp"
-        android:lineSpacingExtra="4dp"
-        android:textColor="@android:color/darker_gray" />
+    android:background="#F5F5F5">
 
     <LinearLayout
-        android:id="@+id/settings_container"
+        android:id="@+id/top_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_below="@id/instruction_text"
-        android:layout_marginTop="30dp"
-        android:orientation="vertical"
-        android:background="#F5F5F5"
-        android:padding="16dp">
+        android:orientation="horizontal"
+        android:background="#FFFFFF"
+        android:elevation="4dp"
+        android:padding="12dp">
 
         <TextView
-            android:id="@+id/tv_speed_label"
+            android:id="@+id/tv_current_folder"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="All Folders"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btn_new_folder"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Scroll Speed: 1x (Original Default)"
-            android:textColor="@android:color/black"
-            android:textStyle="bold"
-            android:textSize="14sp" />
+            android:text="+ Folder"
+            android:textSize="12sp"
+            android:layout_marginEnd="8dp"/>
 
-        <SeekBar
-            android:id="@+id/sb_speed"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="20dp"
-            android:max="3"
-            android:progress="1" />
-
-        <TextView
-            android:id="@+id/tv_window_label"
+        <Button
+            android:id="@+id/btn_settings"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Scanner Window Size: ±20px (40px Total)"
-            android:textColor="@android:color/black"
-            android:textStyle="bold"
-            android:textSize="14sp" />
-
-        <SeekBar
-            android:id="@+id/sb_window"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:max="80"
-            android:progress="15" />
+            android:text="Settings"
+            android:textSize="12sp" />
     </LinearLayout>
 
-    <Button
-        android:id="@+id/btn_start"
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rv_gallery"
         android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_below="@id/top_bar"
+        android:layout_above="@id/bottom_action_panel"
+        android:padding="4dp"
+        android:clipToPadding="false" />
+
+    <Button
+        android:id="@+id/btn_start_service"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_below="@id/settings_container"
-        android:layout_marginTop="40dp"
-        android:padding="16dp"
-        android:text="Start Longshot Service"
-        android:textSize="18sp" />
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="80dp"
+        android:text="START LONGSHOT OVERLAY"
+        android:backgroundTint="#4CAF50"
+        android:textColor="#FFF"/>
+
+    <LinearLayout
+        android:id="@+id/bottom_action_panel"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:layout_alignParentBottom="true"
+        android:orientation="horizontal"
+        android:background="#333333"
+        android:visibility="gone">
+
+        <Button android:id="@+id/btn_action_move" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="MOVE" android:backgroundTint="#00000000" android:textColor="#FFF"/>
+        <Button android:id="@+id/btn_action_copy" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="COPY" android:backgroundTint="#00000000" android:textColor="#FFF"/>
+        <Button android:id="@+id/btn_action_share" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="SHARE" android:backgroundTint="#00000000" android:textColor="#FFF"/>
+        <Button android:id="@+id/btn_action_delete" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="DELETE" android:backgroundTint="#00000000" android:textColor="#FF5252"/>
+    </LinearLayout>
 
 </RelativeLayout>
